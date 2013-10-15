@@ -25,6 +25,7 @@ different port or bit, change the macros below:
 
 #include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include <avr/io.h>
 #include <avr/wdt.h>
@@ -155,13 +156,17 @@ static union {
 
 static uint8_t uni_buffer_fill;
 static uint8_t current_command;
+
+static uchar    reportBuffer[2];    /* buffer for HID reports */
+static uchar    idleRate;           /* in 4 ms units */
+
+static bool  keyDidChange = false;
 /* ------------------------------------------------------------------------- */
 
 
 uint8_t read_button(void){
-	uint8_t t,u,v=0;
+	uint8_t t,v=0;
 	t = DDRB;
-	u = PORTB;
 	DDRB &= ~(1<<BUTTON_PIN);
 	PORTB |= 1<<BUTTON_PIN;
 	PORTB &= ~(1<<BUTTON_PIN);
@@ -174,36 +179,68 @@ uint8_t read_button(void){
 	return v;
 }
 
-void init_tmpsensor(void){
+void init_temperature_sensor(void){
 	ADMUX = 0x8F;
 	ADCSRA = 0x87;
 }
 
-uint16_t read_tmpsensor(void){
+uint16_t read_temperture_sensor(void){
 	ADCSRA |= 0x40;
 	while(ADCSRA & 0x40)
 		;
 	return ADC;
 }
 
+#if 0
+uchar   usbFunctionSetup(uchar data[8])
+{
+usbRequest_t    *rq = (void *)data;
+
+    usbMsgPtr = reportBuffer;
+    if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS){    /* class request type */
+        if(rq->bRequest == USBRQ_HID_GET_REPORT){  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
+            /* we only have one report type, so don't look at wValue */
+            buildReport(keyPressed());
+            return sizeof(reportBuffer);
+        }else if(rq->bRequest == USBRQ_HID_GET_IDLE){
+            usbMsgPtr = &idleRate;
+            return 1;
+        }else if(rq->bRequest == USBRQ_HID_SET_IDLE){
+            idleRate = rq->wValue.bytes[1];
+        }
+    }else{
+        /* no vendor specific requests implemented */
+    }
+    return 0;
+}
+#endif
+
 usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
 	usbRequest_t    *rq = (usbRequest_t *)data;
-
-    if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_VENDOR)
-	{
+	if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS) {    /* class request type */
+	    color.name.red = 13;
+	    if (rq->bRequest == USBRQ_HID_GET_REPORT){  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
+            /* we only have one report type, so don't look at wValue */
+            if (color.name.red == 133) {
+                color.name.red = 23;
+                usbMsgPtr = reportBuffer;
+                reportBuffer[0] = 0;
+                reportBuffer[1] = KEY_X;
+            }
+            return sizeof(reportBuffer);
+        } else if (rq->bRequest == USBRQ_HID_GET_IDLE) {
+            usbMsgPtr = &idleRate;
+            return 1;
+        }else if (rq->bRequest == USBRQ_HID_SET_IDLE) {
+            usbMsgPtr = reportBuffer;
+            idleRate = rq->wValue.bytes[1];
+        }
+    }
+    if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_VENDOR) {
 		current_command = rq->bRequest;
     	switch(rq->bRequest)
 		{
-		case CUSTOM_RQ_SET_RED:
-			color.name.red = rq->wValue.bytes[0];
-			break;	
-		case CUSTOM_RQ_SET_GREEN:
-			color.name.green = rq->wValue.bytes[0];
-			break;	
-		case CUSTOM_RQ_SET_BLUE:
-			color.name.blue = rq->wValue.bytes[0];
-			break;	
 		case CUSTOM_RQ_SET_RGB:
 			return USB_NO_MSG;
 		case CUSTOM_RQ_GET_RGB:{
@@ -235,18 +272,12 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			usbMsgPtr = uni_buffer.w8;
 			return 1;
 		case CUSTOM_RQ_READ_TMPSENS:
-			uni_buffer.w16[0] = read_tmpsensor();
+			uni_buffer.w16[0] = read_temperture_sensor();
 			usbMsgPtr = uni_buffer.w8;
 			return 2;
 		}
     }
-	else
-	{
-        /* calls requests USBRQ_HID_GET_REPORT and USBRQ_HID_SET_REPORT are
-         * not implemented since we never call them. The operating system
-         * won't call them either because our descriptor defines no meaning.
-         */
-    }
+
     return 0;   /* default for not implemented requests: return no data back to host */
 }
 
@@ -258,6 +289,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 			return 1;
 		}
 		memcpy(color.idx, data, 6);
+        keyDidChange = true;
 		return 1;
 	case CUSTOM_RQ_WRITE_MEM:
 		memcpy(uni_buffer.ptr[0], data, len);
@@ -357,7 +389,7 @@ int main(void)
      * additional hardware initialization.
      */
 
-    init_tmpsensor();
+    init_temperature_sensor();
     usbInit();
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
     i = 0;
@@ -371,10 +403,19 @@ int main(void)
     sei();
 
     for(;;){                /* main event loop */
-		update_pwm();
+	//	update_pwm();
 		
         wdt_reset();
         usbPoll();
+        if(keyDidChange && usbInterruptIsReady()){
+            keyDidChange = 0;
+            color.name.red = 42;
+            /* use last key and not current key status in order to avoid lost
+               changes in key status. */
+           reportBuffer[0] = 0;
+           reportBuffer[1] = KEY_Y;
+           usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
+        }
     }
     return 0;
 }
