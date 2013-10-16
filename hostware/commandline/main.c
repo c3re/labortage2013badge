@@ -107,7 +107,7 @@ void read_mem(char* param){
 		fprintf(stderr, "ERROR: out of memory\n");
 		exit(1);
 	}
-	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_MEM, (int)((unsigned)addr), 0, (char*)buffer, length, 5000);
+	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_MEM, (intptr_t)addr, 0, (char*)buffer, length, 5000);
 	if(cnt!=length){
 		if(f)
 			fclose(f);
@@ -181,7 +181,7 @@ void write_mem(char* param){
 		}
 
 	}
-	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_WRITE_MEM, (int)addr, 0, (char*)buffer, length, 5000);
+	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_WRITE_MEM, (intptr_t)addr, 0, (char*)buffer, length, 5000);
 	if(cnt!=length){
 		fprintf(stderr, "ERROR: device accepted ony %d bytes out of %d\n", cnt, length);
 		exit(1);
@@ -212,7 +212,7 @@ void read_flash(char* param){
 		fprintf(stderr, "ERROR: out of memory\n");
 		exit(1);
 	}
-	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_FLASH, (int)addr, 0, (char*)buffer, length, 5000);
+	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_FLASH, (intptr_t)addr, 0, (char*)buffer, length, 5000);
 	if(cnt!=length){
 		if(f)
 			fclose(f);
@@ -265,7 +265,11 @@ void read_temperature(char* param){
 	uint16_t v;
 	int cnt;
 	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_TMPSENS, 0, 0, (char*)&v, 2, 5000);
-	printf("temperature raw value: %hd 0x%hx\n", v, v);
+	if (cnt == 2) {
+	    printf("temperature raw value: %hd 0x%hx\n", v, v);
+	} else {
+        fprintf(stderr, "Error: reading %d bytes for temperature, expecting 2\n", cnt);
+	}
 }
 
 
