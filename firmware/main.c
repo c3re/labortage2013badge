@@ -145,16 +145,10 @@ PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
 #define CAPS_LOCK 2
 #define SCROLL_LOCK 4
 
-union {
-	struct {
-		uint16_t red;
-		uint16_t green;
-		uint16_t blue;
-	} name;
-	uint16_t idx[3];
-} color;
 
 #define UNI_BUFFER_SIZE 16
+
+static uint8_t dbg_buffer[8];
 
 static union {
 	uint8_t  w8[UNI_BUFFER_SIZE];
@@ -219,35 +213,10 @@ uint16_t read_temperture_sensor(void){
 	return ADC;
 }
 
-#if 0
-uchar   usbFunctionSetup(uchar data[8])
-{
-usbRequest_t    *rq = (void *)data;
-
-    usbMsgPtr = reportBuffer;
-    if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS){    /* class request type */
-        if(rq->bRequest == USBRQ_HID_GET_REPORT){  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
-            /* we only have one report type, so don't look at wValue */
-            buildReport(keyPressed());
-            return sizeof(reportBuffer);
-        }else if(rq->bRequest == USBRQ_HID_GET_IDLE){
-            usbMsgPtr = &idleRate;
-            return 1;
-        }else if(rq->bRequest == USBRQ_HID_SET_IDLE){
-            idleRate = rq->wValue.bytes[1];
-        }
-    }else{
-        /* no vendor specific requests implemented */
-    }
-    return 0;
-}
-#endif
-
 usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
 	usbRequest_t    *rq = (usbRequest_t *)data;
 	if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS) {    /* class request type */
-	    color.name.red = 13;
 	    switch(rq->bRequest) {
         case USBRQ_HID_GET_REPORT: // send "no keys pressed" if asked here
             // wValue: ReportType (highbyte), ReportID (lowbyte)
@@ -273,14 +242,20 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 		current_command = rq->bRequest;
     	switch(rq->bRequest)
 		{
-		case CUSTOM_RQ_SET_RGB:
+    	case CUSTOM_RQ_PRESS_BUTTON:
+    	    key_state = STATE_SEND_KEY;
+    	    return 0;
+    	case CUSTOM_RQ_CLR_DBG:
+            memset(dbg_buffer, 0, sizeof(dbg_buffer));
+            return 0;
+		case CUSTOM_RQ_SET_DBG:
 			return USB_NO_MSG;
-		case CUSTOM_RQ_GET_RGB:{
-			usbMsgLen_t len = 6;
-			if(len>rq->wLength.word){
+		case CUSTOM_RQ_GET_DBG:{
+			usbMsgLen_t len = 8;
+			if(len > rq->wLength.word){
 				len = rq->wLength.word;
 			}
-			usbMsgPtr = (uchar*)color.idx;
+			usbMsgPtr = dbg_buffer;
 			return len;
 		}
 		case CUSTOM_RQ_READ_MEM:
@@ -322,12 +297,11 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	    if (data[0] != LED_state)
 	        LED_state = data[0];
 	    return 1; // Data read, not expecting more
-	case CUSTOM_RQ_SET_RGB:
-		if(len != 6){
-			return 1;
+	case CUSTOM_RQ_SET_DBG:
+		if(len > sizeof(dbg_buffer)){
+			len = sizeof(dbg_buffer);
 		}
-		memcpy(color.idx, data, 6);
-        key_state = STATE_SEND_KEY;
+		memcpy(dbg_buffer, data, len);
 		return 1;
 	case CUSTOM_RQ_WRITE_MEM:
 		memcpy(uni_buffer.ptr[0], data, len);
@@ -449,28 +423,19 @@ int main(void)
         wdt_reset();
         usbPoll();
 
-        if(usbInterruptIsReady())
-            color.name.green = 0x10 | key_state;
-        else
-            color.name.green = 0;
-
         if(usbInterruptIsReady() && key_state != STATE_WAIT){
-            color.name.red = 16;
             switch(key_state) {
             case STATE_SEND_KEY:
-                color.name.red = 17;
                 buildReport('x');
                 key_state = STATE_RELEASE_KEY; // release next
                 break;
             case STATE_RELEASE_KEY:
-                color.name.red = 18;
                 buildReport(0);
             default:
                 key_state = STATE_WAIT; // should not happen
             }
                         // start sending
             usbSetInterrupt((void *)&keyboard_report, sizeof(keyboard_report));
-            color.name.red |= 0x40;
 
         }
 
