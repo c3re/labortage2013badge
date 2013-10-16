@@ -44,35 +44,40 @@ void update_pwm(void);
 /* ------------------------------------------------------------------------- */
 /* ----------------------------- USB interface ----------------------------- */
 /* ------------------------------------------------------------------------- */
-const PROGMEM char usbHidReportDescriptor[35] = {   /* USB report descriptor */
+PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {
     0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
     0x09, 0x06,                    // USAGE (Keyboard)
     0xa1, 0x01,                    // COLLECTION (Application)
-    0x05, 0x07,                    //   USAGE_PAGE (Keyboard)
-    0x19, 0xe0,                    //   USAGE_MINIMUM (Keyboard LeftControl)
-    0x29, 0xe7,                    //   USAGE_MAXIMUM (Keyboard Right GUI)
-    0x15, 0x00,                    //   LOGICAL_MINIMUM (0)
-    0x25, 0x01,                    //   LOGICAL_MAXIMUM (1)
     0x75, 0x01,                    //   REPORT_SIZE (1)
     0x95, 0x08,                    //   REPORT_COUNT (8)
-    0x81, 0x02,                    //   INPUT (Data,Var,Abs)
+    0x05, 0x07,                    //   USAGE_PAGE (Keyboard)(Key Codes)
+    0x19, 0xe0,                    //   USAGE_MINIMUM (Keyboard LeftControl)(224)
+    0x29, 0xe7,                    //   USAGE_MAXIMUM (Keyboard Right GUI)(231)
+    0x15, 0x00,                    //   LOGICAL_MINIMUM (0)
+    0x25, 0x01,                    //   LOGICAL_MAXIMUM (1)
+    0x81, 0x02,                    //   INPUT (Data,Var,Abs) ; Modifier byte
     0x95, 0x01,                    //   REPORT_COUNT (1)
     0x75, 0x08,                    //   REPORT_SIZE (8)
+    0x81, 0x03,                    //   INPUT (Cnst,Var,Abs) ; Reserved byte
+    0x95, 0x05,                    //   REPORT_COUNT (5)
+    0x75, 0x01,                    //   REPORT_SIZE (1)
+    0x05, 0x08,                    //   USAGE_PAGE (LEDs)
+    0x19, 0x01,                    //   USAGE_MINIMUM (Num Lock)
+    0x29, 0x05,                    //   USAGE_MAXIMUM (Kana)
+    0x91, 0x02,                    //   OUTPUT (Data,Var,Abs) ; LED report
+    0x95, 0x01,                    //   REPORT_COUNT (1)
+    0x75, 0x03,                    //   REPORT_SIZE (3)
+    0x91, 0x03,                    //   OUTPUT (Cnst,Var,Abs) ; LED report padding
+    0x95, 0x06,                    //   REPORT_COUNT (6)
+    0x75, 0x08,                    //   REPORT_SIZE (8)
+    0x15, 0x00,                    //   LOGICAL_MINIMUM (0)
     0x25, 0x65,                    //   LOGICAL_MAXIMUM (101)
-    0x19, 0x00,                    //   USAGE_MINIMUM (Reserved (no event indicated))
-    0x29, 0x65,                    //   USAGE_MAXIMUM (Keyboard Application)
+    0x05, 0x07,                    //   USAGE_PAGE (Keyboard)(Key Codes)
+    0x19, 0x00,                    //   USAGE_MINIMUM (Reserved (no event indicated))(0)
+    0x29, 0x65,                    //   USAGE_MAXIMUM (Keyboard Application)(101)
     0x81, 0x00,                    //   INPUT (Data,Ary,Abs)
     0xc0                           // END_COLLECTION
 };
-/* We use a simplifed keyboard report descriptor which does not support the
- * boot protocol. We don't allow setting status LEDs and we only allow one
- * simultaneous key press (except modifiers). We can therefore use short
- * 2 byte input reports.
- * The report descriptor has been created with usb.org's "HID Descriptor Tool"
- * which can be downloaded from http://www.usb.org/developers/hidpage/.
- * Redundant entries (such as LOGICAL_MINIMUM and USAGE_PAGE) have been omitted
- * for the second INPUT item.
- */
 
 /* Keyboard usage values, see usb.org's HID-usage-tables document, chapter
  * 10 Keyboard/Keypad Page for more codes.
@@ -136,6 +141,10 @@ const PROGMEM char usbHidReportDescriptor[35] = {   /* USB report descriptor */
 #define KEY_F11     68
 #define KEY_F12     69
 
+#define NUM_LOCK 1
+#define CAPS_LOCK 2
+#define SCROLL_LOCK 4
+
 union {
 	struct {
 		uint16_t red;
@@ -157,12 +166,31 @@ static union {
 static uint8_t uni_buffer_fill;
 static uint8_t current_command;
 
-static uchar    reportBuffer[2];    /* buffer for HID reports */
-static uchar    idleRate;           /* in 4 ms units */
+typedef struct {
+    uint8_t modifier;
+    uint8_t reserved;
+    uint8_t keycode[6];
+} keyboard_report_t;
 
-static bool  keyDidChange = false;
+#define STATE_WAIT 0
+#define STATE_SEND_KEY 1
+#define STATE_RELEASE_KEY 2
+
+
+static keyboard_report_t keyboard_report; // sent to PC
+static uchar idleRate;           /* in 4 ms units */
+static uchar key_state = STATE_WAIT;
+volatile static uchar LED_state = 0xff; // received from PC
 /* ------------------------------------------------------------------------- */
 
+void buildReport(uchar send_key) {
+    keyboard_report.modifier = 0;
+
+    if(send_key >= 'a' && send_key <= 'z')
+        keyboard_report.keycode[0] = 4 + (send_key - 'a');
+    else
+        keyboard_report.keycode[0] = 0;
+}
 
 uint8_t read_button(void){
 	uint8_t t,v=0;
@@ -220,21 +248,25 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 	usbRequest_t    *rq = (usbRequest_t *)data;
 	if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS) {    /* class request type */
 	    color.name.red = 13;
-	    if (rq->bRequest == USBRQ_HID_GET_REPORT){  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
-            /* we only have one report type, so don't look at wValue */
-            if (color.name.red == 133) {
-                color.name.red = 23;
-                usbMsgPtr = reportBuffer;
-                reportBuffer[0] = 0;
-                reportBuffer[1] = KEY_X;
+	    switch(rq->bRequest) {
+        case USBRQ_HID_GET_REPORT: // send "no keys pressed" if asked here
+            // wValue: ReportType (highbyte), ReportID (lowbyte)
+            usbMsgPtr = (void *)&keyboard_report; // we only have this one
+            keyboard_report.modifier = 0;
+            keyboard_report.keycode[0] = 0;
+            return sizeof(keyboard_report);
+        case USBRQ_HID_SET_REPORT: // if wLength == 1, should be LED state
+            if (rq->wLength.word == 1) {
+                current_command = LED_WRITE;
+                return USB_NO_MSG;
             }
-            return sizeof(reportBuffer);
-        } else if (rq->bRequest == USBRQ_HID_GET_IDLE) {
+            return 0;
+        case USBRQ_HID_GET_IDLE: // send idle rate to PC as required by spec
             usbMsgPtr = &idleRate;
             return 1;
-        }else if (rq->bRequest == USBRQ_HID_SET_IDLE) {
-            usbMsgPtr = reportBuffer;
+        case USBRQ_HID_SET_IDLE: // save idle rate as required by spec
             idleRate = rq->wValue.bytes[1];
+            return 0;
         }
     }
     if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_VENDOR) {
@@ -244,7 +276,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 		case CUSTOM_RQ_SET_RGB:
 			return USB_NO_MSG;
 		case CUSTOM_RQ_GET_RGB:{
-			usbMsgLen_t len=6;
+			usbMsgLen_t len = 6;
 			if(len>rq->wLength.word){
 				len = rq->wLength.word;
 			}
@@ -281,23 +313,29 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
     return 0;   /* default for not implemented requests: return no data back to host */
 }
 
+
 uchar usbFunctionWrite(uchar *data, uchar len)
 {
 	switch(current_command){
+
+	case LED_WRITE:
+	    if (data[0] != LED_state)
+	        LED_state = data[0];
+	    return 1; // Data read, not expecting more
 	case CUSTOM_RQ_SET_RGB:
-		if(len!=6){
+		if(len != 6){
 			return 1;
 		}
 		memcpy(color.idx, data, 6);
-        keyDidChange = true;
+        key_state = STATE_SEND_KEY;
 		return 1;
 	case CUSTOM_RQ_WRITE_MEM:
 		memcpy(uni_buffer.ptr[0], data, len);
 		uni_buffer.w16[0] += len;
 		return !(uni_buffer.w16[1] -= len);
 	case CUSTOM_RQ_EXEC_SPM:
-		if(uni_buffer_fill<8){
-			uint8_t l = 8-uni_buffer_fill;
+		if(uni_buffer_fill < 8){
+			uint8_t l = 8 - uni_buffer_fill;
 			if(len<l){
 				len = l;
 			}
@@ -306,11 +344,11 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 			return 0;
 		}
 		uni_buffer.w16[1] -= len;
-		if(uni_buffer.w16[1]>8){
+		if (uni_buffer.w16[1] > 8) {
 			memcpy(uni_buffer.ptr[0], data, len);
 			uni_buffer.w16[0] += len;
 			return 0;
-		}else{
+		} else {
 			memcpy(&(uni_buffer.w8[uni_buffer_fill]), data, len);
 			exec_spm(uni_buffer.w16[2], uni_buffer.w16[3], uni_buffer.ptr[0], data, len);
 			return 1;
@@ -321,7 +359,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	return 0;
 }
 uchar usbFunctionRead(uchar *data, uchar len){
-	uchar ret=len;
+	uchar ret = len;
 	switch(current_command){
 	case CUSTOM_RQ_READ_FLASH:
 		while(len--){
@@ -341,22 +379,22 @@ uchar       trialValue = 0, optimumValue;
 int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
  
     /* do a binary search: */
-    do{
+    do {
         OSCCAL = trialValue + step;
         x = usbMeasureFrameLength();    // proportional to current real frequency
         if(x < targetValue)             // frequency still too low
             trialValue += step;
         step >>= 1;
-    }while(step > 0);
+    } while(step > 0);
     /* We have a precision of +/- 1 for optimum OSCCAL here */
     /* now do a neighborhood search for optimum value */
     optimumValue = trialValue;
     optimumDev = x; // this is certainly far away from optimum
-    for(OSCCAL = trialValue - 1; OSCCAL <= trialValue + 1; OSCCAL++){
+    for (OSCCAL = trialValue - 1; OSCCAL <= trialValue + 1; OSCCAL++){
         x = usbMeasureFrameLength() - targetValue;
-        if(x < 0)
+        if (x < 0)
             x = -x;
-        if(x < optimumDev){
+        if (x < optimumDev) {
             optimumDev = x;
             optimumValue = OSCCAL;
         }
@@ -389,16 +427,19 @@ int main(void)
      * additional hardware initialization.
      */
 
+    memset(&keyboard_report, 0, sizeof(keyboard_report));
+
     init_temperature_sensor();
     usbInit();
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
     i = 0;
-    while(--i){             /* fake USB disconnect for > 250 ms */
+    while(--i){             /* fake USB disconnect for ~512 ms */
         wdt_reset();
-        _delay_ms(1);
+        _delay_ms(2);
     }
     usbDeviceConnect();
     LED_PORT_DDR |= _BV(R_BIT) | _BV(G_BIT) | _BV(B_BIT);   /* make the LED bit an output */
+
 	
     sei();
 
@@ -407,15 +448,32 @@ int main(void)
 		
         wdt_reset();
         usbPoll();
-        if(keyDidChange && usbInterruptIsReady()){
-            keyDidChange = 0;
-            color.name.red = 42;
-            /* use last key and not current key status in order to avoid lost
-               changes in key status. */
-           reportBuffer[0] = 0;
-           reportBuffer[1] = KEY_Y;
-           usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
+
+        if(usbInterruptIsReady())
+            color.name.green = 0x10 | key_state;
+        else
+            color.name.green = 0;
+
+        if(usbInterruptIsReady() && key_state != STATE_WAIT){
+            color.name.red = 16;
+            switch(key_state) {
+            case STATE_SEND_KEY:
+                color.name.red = 17;
+                buildReport('x');
+                key_state = STATE_RELEASE_KEY; // release next
+                break;
+            case STATE_RELEASE_KEY:
+                color.name.red = 18;
+                buildReport(0);
+            default:
+                key_state = STATE_WAIT; // should not happen
+            }
+                        // start sending
+            usbSetInterrupt((void *)&keyboard_report, sizeof(keyboard_report));
+            color.name.red |= 0x40;
+
         }
+
     }
     return 0;
 }
