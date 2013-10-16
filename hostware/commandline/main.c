@@ -37,24 +37,51 @@ int pad=-1;
 char* fname;
 usb_dev_handle *handle = NULL;
 
-void set_rgb(char* color){
-	uint16_t buffer[3] = {0, 0, 0};
-	sscanf(color, "%hi:%hi:%hi", &(buffer[0]), &(buffer[1]), &(buffer[2]));
-	buffer[0] &= (1<<10)-1;
-	buffer[1] &= (1<<10)-1;
-	buffer[2] &= (1<<10)-1;
-	usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_SET_RGB, 0, 0, (char*)buffer, 6, 5000);
+int8_t hex_to_int(char c) {
+    int8_t r = -1;
+    if (c >= '0' && c <= '9') {
+        r = c - '0';
+    } else {
+        c |= 'a' ^ 'A';
+        if (c >= 'a' && c <= 'f') {
+            r = 10 + c - 'a';
+        }
+    }
+    return r;
 }
 
-void get_rgb(char* param){
-	uint16_t buffer[3];
-	int cnt;
-	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_RGB, 0, 0, (char*)buffer, 6, 5000);
-	if(cnt!=6){
-		fprintf(stderr, "ERROR: received %d bytes from device while expecting %d bytes\n", cnt, 6);
-		exit(1);
+void press_button(char* param){
+    usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_PRESS_BUTTON, 0, 0, NULL, 0, 5000);
+}
+
+void set_dbg(char *hex_string){
+	uint8_t buffer[(strlen(hex_string) + 1) / 2];
+	size_t i = 0, length = 0;
+	int8_t t;
+
+	memset(buffer, 0, (strlen(hex_string) + 1) / 2);
+
+	while (hex_string[i]) {
+	    t = hex_to_int(hex_string[i]);
+	    if (t == -1){
+	        break;
+	    }
+	    if (i & 1) {
+	        buffer[length++] |= t;
+	    } else {
+	        buffer[length] |= t << 4;
+	    }
 	}
-	printf("red:   %5hu\ngreen: %5hu\nblue:  %5u\n", buffer[0], buffer[1], buffer[2]);
+
+	usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_SET_DBG, 0, 0, (char*)buffer, length, 5000);
+}
+
+void get_dbg(char* param){
+	uint16_t buffer[256];
+	int cnt;
+	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_DBG, 0, 0, (char*)buffer, 256, 5000);
+	printf("DBG-Buffer:\n");
+	hexdump_block(stdout, buffer, 0, cnt, 16);
 }
 
 void read_mem(char* param){
@@ -323,25 +350,25 @@ int main(int argc, char **argv)
     }
 
     for(;;){
-    	c = getopt_long(argc, argv, "s:gr:z:w:x:a:f:p::q::bk::tl:",
+    	c = getopt_long(argc, argv, "s:gr:z:w:x:a:f:p::q::bk::tl:e",
                 long_options, &option_index);
     	if(c == -1){
     		break;
     	}
 
-    	if(action_fn && strchr("sgrzwxaqbkt", c)){
+    	if(action_fn && strchr("sgrzwxaqbkte", c)){
     		/* action given while already having an action */
     		usage(argv[0]);
     		exit(1);
     	}
 
-    	if(strchr("sgrzwxaqkt", c)){
+    	if(strchr("sgrzwxaqkte", c)){
     		main_arg = optarg;
     	}
 
     	switch(c){
-    	case 's': action_fn = set_rgb; break;
-    	case 'g': action_fn = get_rgb; break;
+    	case 's': action_fn = set_dbg; break;
+    	case 'g': action_fn = get_dbg; break;
     	case 'r': action_fn = read_mem; break;
     	case 'z': action_fn = read_flash; break;
     	case 'w': action_fn = write_mem; break;
@@ -352,8 +379,9 @@ int main(int argc, char **argv)
     	case 'f': fname = optarg; break;
     	case 'p': pad = 0; if(optarg) pad=strtoul(optarg, NULL, 0); break;
        	case 'l': exec_loops = strtoul(optarg, NULL, 0); break;
+        case 'e': action_fn = press_button; break;
         case 'x':
-    	case 'a':
+        case 'a':
     	default:
     		break;
     	}
