@@ -270,19 +270,17 @@ void buildReport(uchar send_key) {
     }
 }
 
-uint8_t read_button(void){
-	uint8_t t,v=0;
-	t = DDRB;
-	DDRB &= ~(1<<BUTTON_PIN);
-	PORTB |= 1<<BUTTON_PIN;
-	PORTB &= ~(1<<BUTTON_PIN);
-	v |= PINB;
-	DDRB |= t&(1<<BUTTON_PIN);
-	PORTB &= ~(t&(1<<BUTTON_PIN));
-	v >>= BUTTON_PIN;
-	v &= 1;
-	v ^= 1;
-	return v;
+static inline
+int8_t button_get_debounced(uint8_t debounce_count) {
+    uint8_t v;
+    v = PINB & _BV(BUTTON_PIN);
+    while (debounce_count-- && v == (PINB & _BV(BUTTON_PIN))) {
+        ;
+    }
+    if (debounce_count) {
+        return -1;
+    }
+    return v ? 0 : 1;
 }
 
 void init_temperature_sensor(void){
@@ -362,7 +360,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
             return 1;
     	case CUSTOM_RQ_GET_TOKEN:
     	    token_generate();
-    	    usbMsgPtr = token;
+    	    usbMsgPtr = (usbMsgPtr_t)token;
     	    return strlen(token);
 
     	case CUSTOM_RQ_PRESS_BUTTON:
@@ -399,7 +397,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			soft_reset((uint8_t)(rq->wValue.word));
 			break;
 		case CUSTOM_RQ_READ_BUTTON:
-			uni_buffer.w8[0] = read_button();
+			uni_buffer.w8[0] = button_get_debounced(25);
 			usbMsgPtr = uni_buffer.w8;
 			return 1;
 		case CUSTOM_RQ_READ_TMPSENS:
@@ -524,12 +522,10 @@ void usbEventResetReady(void)
 
 /* ------------------------------------------------------------------------- */
 
-char key_seq[] = "Hello World";
-
 int main(void)
 {
-	uchar  i;
 	size_t idx = 0;
+	int8_t i = 0, last_stable_button_state = 0;
 
     wdt_enable(WDTO_1S);
     /* Even if you don't use the watchdog, turn it off here. On newer devices,
@@ -540,17 +536,16 @@ int main(void)
      * additional hardware initialization.
      */
 
+    DDRB &= ~_BV(BUTTON_PIN); /* make button pin input */
+    PORTB |= _BV(BUTTON_PIN); /* turn on pull-up resistor */
     init_temperature_sensor();
     usbInit();
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
-    i = 0;
     while(--i){             /* fake USB disconnect for ~512 ms */
         wdt_reset();
         _delay_ms(2);
     }
     usbDeviceConnect();
-    LED_PORT_DDR |= _BV(R_BIT) | _BV(G_BIT) | _BV(B_BIT);   /* make the LED bit an output */
-
 	
     sei();
 
@@ -558,16 +553,24 @@ int main(void)
         wdt_reset();
         usbPoll();
 
+        i = button_get_debounced(25);
+        if (i != -1) {
+            if (last_stable_button_state == 0 && i == 1) {
+                key_state = STATE_SEND_KEY;
+            }
+            last_stable_button_state = i;
+        }
+
         if(usbInterruptIsReady() && key_state != STATE_WAIT){
             switch(key_state) {
             case STATE_SEND_KEY:
-                buildReport(key_seq[idx]);
+                buildReport(token[idx]);
                 key_state = STATE_RELEASE_KEY; // release next
                 break;
             case STATE_RELEASE_KEY:
                 buildReport(0);
                 ++idx;
-                if (key_seq[idx] == '\0') {
+                if (token[idx] == '\0') {
                     idx = 0;
                     key_state = STATE_WAIT;
                 } else {
