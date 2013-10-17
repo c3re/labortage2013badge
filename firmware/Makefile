@@ -7,7 +7,7 @@
 # License: GNU GPL v2 (see License.txt), GNU GPL v3 or proprietary (CommercialLicense.txt)
 # This Revision: $Id: Makefile 692 2008-11-07 15:07:40Z cs $
 
-DEVICE  = attiny45 #attiny45
+DEVICE  = attiny85 #attiny45
 F_CPU   = 16500000
 FUSE_L  = 0xe1# 1110.0001
 FUSE_H  = 0x9d# 1001.1101
@@ -17,7 +17,7 @@ AVRDUDE_DW  = avrdude -c jtag2dw  -P usb -p $(DEVICE) # edit this line for your 
 
 CFLAGS  = -Iusbdrv -I. -DDEBUG_LEVEL=0
 OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o main.o \
-          special_functions.o
+          percnt2.o sha1-asm.o hmac-sha1.o hotp.o special_functions.o
 
 COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 COMPILEPP = avr-g++ -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)

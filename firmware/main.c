@@ -38,8 +38,8 @@ different port or bit, change the macros below:
 #include "oddebug.h"        /* This is also an example for using debug macros */
 #include "requests.h"       /* The custom request numbers we use */
 #include "special_functions.h"
-
-void update_pwm(void);
+#include "hotp.h"
+#include "percnt2.h"
 
 /* ------------------------------------------------------------------------- */
 /* ----------------------------- USB interface ----------------------------- */
@@ -78,6 +78,11 @@ PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
     0x81, 0x00,                    //   INPUT (Data,Ary,Abs)
     0xc0                           // END_COLLECTION
 };
+
+uint16_t secret_length_ee EEMEM = 0;
+uint8_t  secret_ee[32] EEMEM;
+uint8_t  reset_counter_ee EEMEM = 0;
+uint8_t  digits_ee EEMEM = 8;
 
 /* Keyboard usage values, see usb.org's HID-usage-tables document, chapter
  * 10 Keyboard/Keypad Page for more codes.
@@ -145,10 +150,14 @@ PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
 #define CAPS_LOCK 2
 #define SCROLL_LOCK 4
 
-
-#define UNI_BUFFER_SIZE 16
-
 static uint8_t dbg_buffer[8];
+
+static uint8_t secret[32];
+static uint16_t secret_length_b;
+static char token[10];
+
+
+#define UNI_BUFFER_SIZE 36
 
 static union {
 	uint8_t  w8[UNI_BUFFER_SIZE];
@@ -169,6 +178,7 @@ typedef struct {
 #define STATE_WAIT 0
 #define STATE_SEND_KEY 1
 #define STATE_RELEASE_KEY 2
+#define STATE_NEXT 3
 
 
 static keyboard_report_t keyboard_report; // sent to PC
@@ -177,13 +187,87 @@ static uchar key_state = STATE_WAIT;
 volatile static uchar LED_state = 0xff; // received from PC
 /* ------------------------------------------------------------------------- */
 
+void memory_clean(void) {
+    memset(secret, 0, 32);
+    secret_length_b = 0;
+}
+
+uint8_t secret_set(void){
+    uint8_t r;
+    union {
+        uint8_t w8[32];
+        uint16_t w16[16];
+    } read_back;
+    const uint8_t length_B = (secret_length_b + 7) / 8;
+
+    eeprom_busy_wait();
+    eeprom_write_block(secret, secret_ee, length_B);
+    eeprom_busy_wait();
+    eeprom_read_block(read_back.w8, secret_ee, length_B);
+    r = memcmp(secret, read_back.w8, length_B);
+    memory_clean();
+    memset(read_back.w8, 0, 32);
+    if (r) {
+        return 1;
+    }
+    eeprom_busy_wait();
+    eeprom_write_word(&secret_length_ee, secret_length_b);
+    eeprom_busy_wait();
+    r = eeprom_read_word(&secret_length_ee) == secret_length_b;
+    memory_clean();
+    *read_back.w16 = 0;
+    if (!r) {
+        return 1;
+    }
+    return 0;
+}
+
+void token_generate(void) {
+    percnt_inc(0);
+    eeprom_busy_wait();
+    eeprom_read_block(secret, secret_ee, 32);
+    eeprom_busy_wait();
+    hotp(token, secret, eeprom_read_word(&secret_length_ee), percnt_get(0), eeprom_read_byte(&digits_ee));
+    memory_clean();
+}
+
+void counter_reset(void) {
+    uint8_t reset_counter;
+    eeprom_busy_wait();
+    reset_counter = eeprom_read_byte(&reset_counter_ee);
+    percnt_reset(0);
+    eeprom_busy_wait();
+    eeprom_write_byte(&reset_counter_ee, reset_counter + 1);
+}
+
+void counter_init(void) {
+    eeprom_busy_wait();
+    if (eeprom_read_byte(&reset_counter_ee) == 0) {
+        counter_reset();
+    }
+    percnt_init(0);
+}
+
 void buildReport(uchar send_key) {
     keyboard_report.modifier = 0;
 
-    if(send_key >= 'a' && send_key <= 'z')
-        keyboard_report.keycode[0] = 4 + (send_key - 'a');
-    else
+    switch (send_key) {
+    case 'A' ... 'Z':
+        keyboard_report.modifier = MOD_SHIFT_LEFT;
+        keyboard_report.keycode[0] = KEY_A + (send_key-'A');
+        break;
+    case 'a' ... 'z':
+        keyboard_report.keycode[0] = KEY_A + (send_key-'a');
+        break;
+    case '1' ... '9':
+        keyboard_report.keycode[0] = KEY_1 + (send_key-'1');
+        break;
+    case '0':
+        keyboard_report.keycode[0] = KEY_0;
+        break;
+    default:
         keyboard_report.keycode[0] = 0;
+    }
 }
 
 uint8_t read_button(void){
@@ -242,6 +326,45 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 		current_command = rq->bRequest;
     	switch(rq->bRequest)
 		{
+    	case CUSTOM_RQ_SET_SECRET:
+    	    secret_length_b = rq->wValue.word;
+    	    if (secret_length_b > 256) {
+    	        secret_length_b = 256;
+    	    }
+    	    uni_buffer.w8[0] = 0;
+    	    return USB_NO_MSG;
+    	case CUSTOM_RQ_INC_COUNTER:
+    	    percnt_inc(0);
+    	    return 0;
+    	case CUSTOM_RQ_GET_COUNTER:
+    	    uni_buffer.w32[0] = percnt_get(0);
+    	    usbMsgPtr = (usbMsgPtr_t)uni_buffer.w32;
+    	    return 4;
+    	case CUSTOM_RQ_RESET_COUNTER:
+    	    counter_reset();
+    	    return 0;
+        case CUSTOM_RQ_GET_RESET_COUNTER:
+    	    eeprom_busy_wait();
+            uni_buffer.w8[0] = eeprom_read_byte(&reset_counter_ee);
+            usbMsgPtr = uni_buffer.w8;
+            return 1;
+    	case CUSTOM_RQ_SET_DIGITS:
+    	    if (rq->wValue.bytes[0] > 9) {
+    	        rq->wValue.bytes[0] = 9;
+    	    }
+    	    eeprom_busy_wait();
+    	    eeprom_write_byte(&digits_ee, rq->wValue.bytes[0]);
+    	    return 0;
+    	case CUSTOM_RQ_GET_DIGITS:
+    	    eeprom_busy_wait();
+            uni_buffer.w8[0] = eeprom_read_byte(&digits_ee);
+            usbMsgPtr = uni_buffer.w8;
+            return 1;
+    	case CUSTOM_RQ_GET_TOKEN:
+    	    token_generate();
+    	    usbMsgPtr = token;
+    	    return strlen(token);
+
     	case CUSTOM_RQ_PRESS_BUTTON:
     	    key_state = STATE_SEND_KEY;
     	    return 0;
@@ -263,13 +386,14 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			return rq->wLength.word;
 		case CUSTOM_RQ_WRITE_MEM:
 		case CUSTOM_RQ_EXEC_SPM:
-			uni_buffer_fill = 4;
+/*			uni_buffer_fill = 4;
 			uni_buffer.w16[0] = rq->wValue.word;
 			uni_buffer.w16[1] = rq->wLength.word;
 			return USB_NO_MSG;
-		case CUSTOM_RQ_READ_FLASH:
+*/		case CUSTOM_RQ_READ_FLASH:
 			uni_buffer.w16[0] = rq->wValue.word;
 			uni_buffer.w16[1] = rq->wLength.word;
+            uni_buffer_fill = 4;
 			return USB_NO_MSG;
 		case CUSTOM_RQ_RESET:
 			soft_reset((uint8_t)(rq->wValue.word));
@@ -297,6 +421,18 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	    if (data[0] != LED_state)
 	        LED_state = data[0];
 	    return 1; // Data read, not expecting more
+	case CUSTOM_RQ_SET_SECRET:
+        {
+            if (uni_buffer.w8[0] < (secret_length_b + 7) / 8) {
+                memcpy(&secret[uni_buffer.w8[0]], data, len);
+                uni_buffer.w8[0] += len;
+            }
+            if (uni_buffer.w8[0] >= (secret_length_b + 7) / 8) {
+                secret_set();
+                return 1;
+            }
+            return 0;
+        }
 	case CUSTOM_RQ_SET_DBG:
 		if(len > sizeof(dbg_buffer)){
 			len = sizeof(dbg_buffer);
@@ -388,9 +524,12 @@ void usbEventResetReady(void)
 
 /* ------------------------------------------------------------------------- */
 
+char key_seq[] = "Hello World";
+
 int main(void)
 {
-	uchar   i;
+	uchar  i;
+	size_t idx = 0;
 
     wdt_enable(WDTO_1S);
     /* Even if you don't use the watchdog, turn it off here. On newer devices,
@@ -400,8 +539,6 @@ int main(void)
      * That's the way we need D+ and D-. Therefore we don't need any
      * additional hardware initialization.
      */
-
-    memset(&keyboard_report, 0, sizeof(keyboard_report));
 
     init_temperature_sensor();
     usbInit();
@@ -418,19 +555,25 @@ int main(void)
     sei();
 
     for(;;){                /* main event loop */
-	//	update_pwm();
-		
         wdt_reset();
         usbPoll();
 
         if(usbInterruptIsReady() && key_state != STATE_WAIT){
             switch(key_state) {
             case STATE_SEND_KEY:
-                buildReport('x');
+                buildReport(key_seq[idx]);
                 key_state = STATE_RELEASE_KEY; // release next
                 break;
             case STATE_RELEASE_KEY:
                 buildReport(0);
+                ++idx;
+                if (key_seq[idx] == '\0') {
+                    idx = 0;
+                    key_state = STATE_WAIT;
+                } else {
+                    key_state = STATE_SEND_KEY;
+                }
+                break;
             default:
                 key_state = STATE_WAIT; // should not happen
             }
