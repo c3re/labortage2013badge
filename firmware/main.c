@@ -159,7 +159,7 @@ static char token[10];
 
 #define UNI_BUFFER_SIZE 36
 
-static union {
+static union __attribute__((packed)) {
 	uint8_t  w8[UNI_BUFFER_SIZE];
 	uint16_t w16[UNI_BUFFER_SIZE/2];
 	uint32_t w32[UNI_BUFFER_SIZE/4];
@@ -187,11 +187,13 @@ static uchar key_state = STATE_WAIT;
 volatile static uchar LED_state = 0xff; // received from PC
 /* ------------------------------------------------------------------------- */
 
+static
 void memory_clean(void) {
     memset(secret, 0, 32);
     secret_length_b = 0;
 }
 
+static
 uint8_t secret_set(void){
     uint8_t r;
     union {
@@ -222,6 +224,7 @@ uint8_t secret_set(void){
     return 0;
 }
 
+static
 void token_generate(void) {
     percnt_inc(0);
     eeprom_busy_wait();
@@ -231,6 +234,7 @@ void token_generate(void) {
     memory_clean();
 }
 
+static
 void counter_reset(void) {
     uint8_t reset_counter;
     eeprom_busy_wait();
@@ -240,6 +244,7 @@ void counter_reset(void) {
     eeprom_write_byte(&reset_counter_ee, reset_counter + 1);
 }
 
+static
 void counter_init(void) {
     eeprom_busy_wait();
     if (eeprom_read_byte(&reset_counter_ee) == 0) {
@@ -248,6 +253,7 @@ void counter_init(void) {
     percnt_init(0);
 }
 
+static
 void buildReport(uchar send_key) {
     keyboard_report.modifier = 0;
 
@@ -270,8 +276,8 @@ void buildReport(uchar send_key) {
     }
 }
 
-static inline
-int8_t button_get_debounced(uint8_t debounce_count) {
+static
+int8_t button_get_debounced(volatile uint8_t debounce_count) {
     uint8_t v;
     v = PINB & _BV(BUTTON_PIN);
     while (debounce_count-- && v == (PINB & _BV(BUTTON_PIN))) {
@@ -283,11 +289,13 @@ int8_t button_get_debounced(uint8_t debounce_count) {
     return v ? 0 : 1;
 }
 
+static
 void init_temperature_sensor(void){
 	ADMUX = 0x8F;
 	ADCSRA = 0x87;
 }
 
+static
 uint16_t read_temperture_sensor(void){
 	ADCSRA |= 0x40;
 	while(ADCSRA & 0x40)
