@@ -279,6 +279,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
     }
     if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_VENDOR) {
 		current_command = rq->bRequest;
+        usbMsgPtr = uni_buffer.w8;
     	switch(rq->bRequest)
 		{
     	case CUSTOM_RQ_SET_SECRET:
@@ -298,7 +299,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 #else
     	    uni_buffer.w32[0] = percnt_get(0);
 #endif
-    	    usbMsgPtr = (usbMsgPtr_t)uni_buffer.w32;
     	    return 4;
     	case CUSTOM_RQ_RESET_COUNTER:
     	    counter_reset();
@@ -306,7 +306,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
         case CUSTOM_RQ_GET_RESET_COUNTER:
     	    eeprom_busy_wait();
             uni_buffer.w8[0] = eeprom_read_byte(&reset_counter_ee);
-            usbMsgPtr = uni_buffer.w8;
             return 1;
     	case CUSTOM_RQ_SET_DIGITS:
     	    if (rq->wValue.bytes[0] > 9) {
@@ -318,13 +317,11 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
     	case CUSTOM_RQ_GET_DIGITS:
     	    eeprom_busy_wait();
             uni_buffer.w8[0] = eeprom_read_byte(&digits_ee);
-            usbMsgPtr = uni_buffer.w8;
             return 1;
     	case CUSTOM_RQ_GET_TOKEN:
     	    token_generate();
     	    usbMsgPtr = (usbMsgPtr_t)token;
     	    return strlen(token);
-
     	case CUSTOM_RQ_PRESS_BUTTON:
     	    key_state = STATE_SEND_KEY;
     	    return 0;
@@ -346,7 +343,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			break;
 		case CUSTOM_RQ_READ_BUTTON:
 			uni_buffer.w8[0] = button_get_debounced(25);
-			usbMsgPtr = uni_buffer.w8;
 			return 1;
 		}
     }
