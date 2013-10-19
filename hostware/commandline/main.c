@@ -21,6 +21,7 @@ respectively.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include <getopt.h>
 #include <ctype.h>
 #include <usb.h>        /* this is libusb */
@@ -50,7 +51,7 @@ int8_t hex_to_int(char c) {
     return r;
 }
 
-void press_button(char* param){
+void press_button(char *param){
     usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_PRESS_BUTTON, 0, 0, NULL, 0, 5000);
 }
 
@@ -76,12 +77,101 @@ void set_dbg(char *hex_string){
 	usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_SET_DBG, 0, 0, (char*)buffer, length, 5000);
 }
 
-void get_dbg(char* param){
+void get_dbg(char *param){
 	uint16_t buffer[256];
 	int cnt;
 	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_DBG, 0, 0, (char*)buffer, 256, 5000);
 	printf("DBG-Buffer:\n");
 	hexdump_block(stdout, buffer, 0, cnt, 16);
+}
+
+void clr_dbg(char *param){
+    usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_CLR_DBG, 0, 0, NULL, 0, 5000);
+}
+
+void set_secret(char *hex_string){
+    uint8_t buffer[(strlen(hex_string) + 1) / 2];
+    size_t i = 0, length = 0;
+    int8_t t;
+
+    memset(buffer, 0, (strlen(hex_string) + 1) / 2);
+
+    while (hex_string[i]) {
+        t = hex_to_int(hex_string[i]);
+        if (t == -1){
+            break;
+        }
+        if (i & 1) {
+            buffer[length++] |= t;
+        } else {
+            buffer[length] |= t << 4;
+        }
+    }
+
+    usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_SET_SECRET, length * 8, 0, (char*)buffer, length, 5000);
+}
+
+void inc_counter(char *param){
+    usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_INC_COUNTER, 0, 0, NULL, 0, 5000);
+}
+
+void get_counter(char *param){
+    uint32_t counter;
+    int cnt;
+    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_COUNTER, 0, 0, (char*)&counter, 4, 5000);
+    if (cnt == 4) {
+        printf("internal counter = %"PRId32"\n", counter);
+    } else {
+        fprintf(stderr, "Error: reading %d bytes for counter, expecting 4\n", cnt);
+    }
+}
+
+void reset_counter(char *param){
+    usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_RESET_COUNTER, 0, 0, NULL, 0, 5000);
+}
+
+void get_reset_counter (char *param){
+    uint8_t counter;
+    int cnt;
+    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_RESET_COUNTER, 0, 0, (char*)&counter, 1, 5000);
+    if (cnt == 1) {
+        printf("internal reset counter = %"PRId8"\n", counter);
+    } else {
+        fprintf(stderr, "Error: reading %d bytes for reset counter, expecting 1\n", cnt);
+    }
+}
+
+void get_digits(char *param){
+    uint8_t digits;
+    int cnt;
+    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_DIGITS, 0, 0, (char*)&digits, 1, 5000);
+    if (cnt == 1) {
+        printf("digits = %"PRId8"\n", digits);
+    } else {
+        fprintf(stderr, "Error: reading %d bytes for reset counter, expecting 1\n", cnt);
+    }
+}
+
+void set_digits(char *param){
+    long d;
+    d = strtol(param, NULL, 10);
+    if (d > 9 || d < 6) {
+        fprintf(stderr, "Error: <digits> must be in range 6, 7, 8 or 9\n");
+        return;
+    }
+    usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_SET_DIGITS, d, 0, NULL, 0, 5000);
+}
+
+void get_token(char *param){
+    char token[10];
+    int cnt;
+    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_TOKEN, 0, 0, token, 9, 5000);
+    if (cnt < 9 ) {
+        token[cnt] = '\0';
+        printf("token = %s\n", token);
+    } else {
+        fprintf(stderr, "Error: reading %d bytes for token, expecting max. 9\n", cnt);
+    }
 }
 
 void read_mem(char* param){
@@ -189,52 +279,52 @@ void write_mem(char* param){
 
 }
 
-void read_flash(char* param){
+void read_flash(char* param) {
 	int length=0;
 	uint8_t *buffer, *addr;
 	int cnt;
 	FILE* f=NULL;
-	if(fname){
+	if (fname) {
 		f = fopen(fname, "wb");
-		if(!f){
+		if (!f) {
 			fprintf(stderr, "ERROR: could not open %s for writing\n", fname);
 			exit(1);
 		}
 	}
 	sscanf(param, "%i:%i", (int*)&addr, &length);
-	if(length<=0){
+	if (length <= 0){
 		return;
 	}
 	buffer = malloc(length);
-	if(!buffer){
-		if(f)
+	if (!buffer) {
+		if (f)
 			fclose(f);
 		fprintf(stderr, "ERROR: out of memory\n");
 		exit(1);
 	}
 	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_FLASH, (intptr_t)addr, 0, (char*)buffer, length, 5000);
-	if(cnt!=length){
-		if(f)
+	if (cnt != length){
+		if (f)
 			fclose(f);
 		fprintf(stderr, "ERROR: received %d bytes from device while expecting %d bytes\n", cnt, length);
 		exit(1);
 	}
-	if(f){
+	if (f) {
 		cnt = fwrite(buffer, 1, length, f);
 		fclose(f);
-		if(cnt!=length){
+		if (cnt != length) {
 			fprintf(stderr, "ERROR: could write only %d bytes out of %d bytes\n", cnt, length);
 			exit(1);
 		}
 
-	}else{
+	} else {
 		hexdump_block(stdout, buffer, addr, length, 8);
 	}
 }
 
 void soft_reset(char* param){
-	unsigned delay=0;
-	if(param){
+	unsigned delay = 0;
+	if (param) {
 		sscanf(param, "%i", &delay);
 	}
 	delay &= 0xf;
@@ -248,10 +338,10 @@ void read_button(char* param){
 }
 
 void wait_for_button(char* param){
-	volatile uint8_t v=0, x=1;
+	volatile uint8_t v = 0, x = 1;
 	if(param){
 		printf("DBG: having param: %s\n", param);
-		if(!(strcmp(param,"off") && strcmp(param,"0"))){
+		if (!(strcmp(param,"off") && strcmp(param,"0"))) {
 			x = 0;
 		}
 	}
@@ -275,24 +365,22 @@ void read_temperature(char* param){
 
 static struct option long_options[] =
              {
-               /* These options set a flag. */
-               {"i-am-sure",       no_argument, &safety_question_override, 1},
-               {"pad",             optional_argument, 0, 'p'},
                /* These options don't set a flag.
                   We distinguish them by their indices. */
-               {"set-rgb",         required_argument, 0, 's'},
-               {"get-rgb",               no_argument, 0, 'g'},
-               {"read-mem",        required_argument, 0, 'r'},
-               {"write-mem",       required_argument, 0, 'w'},
-               {"read-flash",      required_argument, 0, 'z'},
-               {"exec-spm",        required_argument, 0, 'x'},
-               {"read-adc",        required_argument, 0, 'a'},
-               {"reset",           optional_argument, 0, 'q'},
-               {"read-button",     required_argument, 0, 'b'},
-               {"wait-for-button", optional_argument, 0, 'k'},
-               {"read-temperature",      no_argument, 0, 't'},
-               {"file",            required_argument, 0, 'f'},
-               {"loop",            required_argument, 0, 'l'},
+               {"set-secret",        required_argument, NULL, 's'},
+               {"inc-counter",       no_argument,       NULL, 'i'},
+               {"get-counter",       no_argument,       NULL, 'c'},
+               {"reset-counter",     no_argument,       NULL, 'r'},
+               {"get-reset-counter", no_argument,       NULL, 'q'},
+               {"get-digits",        no_argument,       NULL, 'D'},
+               {"set-digits",        required_argument, NULL, 'd'},
+               {"reset",             optional_argument, NULL, 'R'},
+               {"get-token",         no_argument,       NULL, 't'},
+               {"read-button",       no_argument,       NULL, 'b'},
+               {"press-button",      no_argument,       NULL, 'B'},
+               {"get-dbg",           no_argument,       NULL, 'x'},
+               {"set-dbg",           required_argument, NULL, 'y'},
+               {"clr-dbg",           no_argument,       NULL, 'z'},
                {0, 0, 0, 0}
              };
 
@@ -300,29 +388,28 @@ static void usage(char *name)
 {
 	char *usage_str =
 	"usage:\n"
-    "    %s [<option>] <command> <parameter string>\n"
-    "  where <option> is one of the following:\n"
-	"    -p --pad[=<pad value>] ............................ pad writing data with <pad value> (default 0) to specified length\n"
-	"    -f --file <name> .................................. use file <name> for reading or writing data\n"
-	"    --i-am-sure ....................................... do not ask safety question\n"
-	"    -l --loop <value> ................................. execute action <value> times\n"
+    "    %s <command> <parameter string>\n"
 	"  <command> is one of the following\n"
-	"    -s --set-rgb <red>:<green>:<blue> ................. set color\n"
-	"    -g --get-rgb ...................................... read color from device and print\n"
-	"    -r --read-mem <addr>:<length> ..................... read RAM\n"
-	"    -w --write-mem <addr>:<length>[:data] ............. write RAM\n"
-	"    -z --read-flash <addr>:<length> ................... read flash\n"
-/*	"    -x --exec-spm <addr>:<length>:<Z>:<R0R1>[:data] ... write RAM, set Z pointer, set r0:r1 and execute SPM\n"
-	"    -a --read-adc <adc> ............................... read ADC\n" */
-	"    -q --reset[=<delay>] .............................. reset the controller with delay in range 0..9\n"
-	"    -b --read-button .................................. read status of button\n"
-	"    -k --wait-for-button[=(on|off)] ................... wait for button press (default: on)\n\n"
-	"    -t --read-temperature ............................. read temperature sensor and output raw value\n"
+	"    -s --set-secret <secret> .... set secret (<secret> is a byte sequence in hex)\n"
+	"    -i --inc-counter ............ increment internal counter\n"
+	"    -c --get-counter ............ get current counter value\n"
+	"    -r --reset-counter .......... reset internal counter to zero\n"
+	"    -q --get-reset-counter....... get the times the counter was reseted\n"
+	"    -D --get-digits ............. get the amount of digits per token\n"
+	"    -d --set-digits <digits>..... set the amount of digits per token (in range 6..9)\n"
+    "    -R --reset[=<delay>] ........ reset the controller with delay (in range 0..9)\n"
+    "    -t --get-token .............. get a token\n\n"
+	"    -b --read-button ............ read status of button\n"
+    "    -B --press-button ........... simulate a button press\n"
+	"    -x --get-dbg ................ get content of the debug register\n"
+    "    -y --set-dbg <data>.......... set content of the debug register (<data> is a byte squence in hex of max. 8 bytes)\n"
+    "    -z --clr-dbg ................ clear the content of the debug register\n"
+
 	" Please note:\n"
 	"   If you use optional parameters you have to use two different way to specify the parameter,\n"
 	"   depending on if you use short or long options.\n"
-	"   Short options: You have to put the parameter directly behind the option letter. Exp: -koff\n"
-	"   Long options: You have to seperate the option from the parameter with '='. Exp: --pad=0xAA\n"
+	"   Short options: You have to put the parameter directly behind the option letter. Exp: -R6\n"
+	"   Long options: You have to seperate the option from the parameter with '='. Exp: --reset=6\n"
 	;
 	fprintf(stderr, usage_str, name);
 }
@@ -338,7 +425,6 @@ int main(int argc, char **argv)
   int  c, option_index;
   void(*action_fn)(char*) = NULL;
   char* main_arg = NULL;
-  unsigned exec_loops=(unsigned)-1;
   usb_init();
   if(argc < 2){   /* we need at least one argument */
     usage(argv[0]);
@@ -353,56 +439,64 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    for(;;){
-    	c = getopt_long(argc, argv, "s:gr:z:w:x:a:f:p::q::bk::tl:e",
-                long_options, &option_index);
-    	if(c == -1){
+    for (;;) {
+    	c = getopt_long(argc, argv, "s:icrqDd:R::tbBxy:z", long_options, &option_index);
+    	if (c == -1) {
     		break;
     	}
 
-    	if(action_fn && strchr("sgrzwxaqbkte", c)){
+    	if (action_fn && strchr("sicrqDdRtbBxyz", c)) {
     		/* action given while already having an action */
     		usage(argv[0]);
     		exit(1);
     	}
 
-    	if(strchr("sgrzwxaqkte", c)){
+    	if(strchr("sdRy", c)){
     		main_arg = optarg;
     	}
-
-    	switch(c){
-    	case 's': action_fn = set_dbg; break;
-    	case 'g': action_fn = get_dbg; break;
-    	case 'r': action_fn = read_mem; break;
-    	case 'z': action_fn = read_flash; break;
-    	case 'w': action_fn = write_mem; break;
-    	case 'q': action_fn = soft_reset; break;
-    	case 'b': action_fn = read_button; break;
-    	case 'k': action_fn = wait_for_button; break;
-    	case 't': action_fn = read_temperature; break;
-    	case 'f': fname = optarg; break;
-    	case 'p': pad = 0; if(optarg) pad=strtoul(optarg, NULL, 0); break;
-       	case 'l': exec_loops = strtoul(optarg, NULL, 0); break;
-        case 'e': action_fn = press_button; break;
-        case 'x':
-        case 'a':
-    	default:
+/*
+    "    -s --set-secret <secret> .... set secret (<secret> is a byte sequence in hex)\n"
+    "    -i --inc-counter ............ increment internal counter\n"
+    "    -c --get-counter ............ get current counter value\n"
+    "    -r --reset-counter .......... reset internal counter to zero\n"
+    "    -q --get-reset-counter....... get the times the counter was reseted\n"
+    "    -D --get-digits ............. get the amount of digits per token\n"
+    "    -d --set-digits <digits>..... set the amount of digits per token (in range 6..9)\n"
+    "    -R --reset[=<delay>] ........ reset the controller with delay (in range 0..9)\n"
+    "    -t --get-token .............. get a token\n\n"
+    "    -b --read-button ............ read status of button\n"
+    "    -B --press-button ........... simulate a button press\n"
+    "    -x --get-dbg ................ get content of the debug register\n"
+    "    -y --set-dbg <data>.......... set content of the debug register (<data> is a byte squence in hex of max. 8 bytes)\n"
+    "    -z --clr-dbg ................ clear the content of the debug register\n"
+*/
+    	switch (c) {
+        case 's': action_fn = set_secret; break;
+        case 'i': action_fn = inc_counter; break;
+        case 'c': action_fn = get_counter; break;
+        case 'r': action_fn = reset_counter; break;
+        case 'q': action_fn = get_reset_counter; break;
+        case 'D': action_fn = get_digits; break;
+        case 'd': action_fn = set_digits; break;
+        case 'R': action_fn = soft_reset; break;
+        case 't': action_fn = get_token; break;
+        case 'b': action_fn = read_button; break;
+        case 'B': action_fn = press_button; break;
+    	case 'y': action_fn = set_dbg; break;
+    	case 'x': action_fn = get_dbg; break;
+    	case 'z': action_fn = clr_dbg; break;
+        default:
     		break;
     	}
     }
 
-    if(!action_fn){
+    if (!action_fn) {
     	usage(argv[0]);
     	fprintf(stderr, "Error: no action specified\n");
     	return 1;
-    }else{
-    	if(exec_loops==(unsigned)-1){
-    		exec_loops = 1;
-    	}
-    	while(exec_loops--){
-    		action_fn(main_arg);
-    	}
-        usb_close(handle);
+    } else {
+        action_fn(main_arg);
+    	usb_close(handle);
     	return 0;
     }
 
