@@ -1,10 +1,10 @@
 /* Name: main.c
- * Project: hid-custom-rq example
- * Author: Christian Starkjohann
- * Creation Date: 2008-04-07
+ * Project: labortage-2013-badge
+ * Author: bg (bg@das-labor.org)
+ * Creation Date: 2013-10-16
  * Tabsize: 4
- * Copyright: (c) 2008 by OBJECTIVE DEVELOPMENT Software GmbH
- * License: GNU GPL v2 (see License.txt), GNU GPL v3 or proprietary (CommercialLicense.txt)
+ * Copyright: (c) 2008 by OBJECTIVE DEVELOPMENT Software GmbH, (c) Daniel Otte
+ * License: GNU GPL v3
  * This Revision: $Id: main.c 692 2008-11-07 15:07:40Z cs $
  */
 
@@ -13,12 +13,12 @@ This example should run on most AVRs with only little changes. No special
 hardware resources except INT0 are used. You may have to change usbconfig.h for
 different I/O pins for USB. Please note that USB D+ must be the INT0 pin, or
 at least be connected to INT0 as well.
-We assume that an LED is connected to port B bit 0. If you connect it to a
-different port or bit, change the macros below:
 */
+
 #define BUTTON_PIN 4
 
 #define SIMPLE_COUNTER 1
+#define NO_CHECK 1
 
 #include <stdint.h>
 #include <string.h>
@@ -32,7 +32,6 @@ different port or bit, change the macros below:
 
 #include <avr/pgmspace.h>   /* required by usbdrv.h */
 #include "usbdrv.h"
-#include "oddebug.h"        /* This is also an example for using debug macros */
 #include "requests.h"       /* The custom request numbers we use */
 #include "hotp.h"
 #if !SIMPLE_COUNTER
@@ -109,7 +108,7 @@ static union __attribute__((packed)) {
 
 static uint8_t current_command;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t modifier;
     uint8_t reserved;
     uint8_t keycode[6];
@@ -126,8 +125,6 @@ void memory_clean(void) {
     memset(secret, 0, 32);
     secret_length_b = 0;
 }
-
-#define NO_CHECK 1
 
 static
 uint8_t secret_set(void){
@@ -308,6 +305,9 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
             uni_buffer.w8[0] = eeprom_read_byte(&reset_counter_ee);
             return 1;
     	case CUSTOM_RQ_SET_DIGITS:
+            if (rq->wValue.bytes[0] < 6) {
+                rq->wValue.bytes[0] = 6;
+            }
     	    if (rq->wValue.bytes[0] > 9) {
     	        rq->wValue.bytes[0] = 9;
     	    }
