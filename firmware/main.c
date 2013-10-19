@@ -261,20 +261,6 @@ int8_t button_get_debounced(volatile uint8_t debounce_count) {
     return v ? 0 : 1;
 }
 
-static
-void init_temperature_sensor(void){
-	ADMUX = 0x8F;
-	ADCSRA = 0x87;
-}
-
-static
-uint16_t read_temperture_sensor(void){
-	ADCSRA |= 0x40;
-	while(ADCSRA & 0x40)
-		;
-	return ADC;
-}
-
 usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
 	usbRequest_t    *rq = (usbRequest_t *)data;
@@ -385,10 +371,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			uni_buffer.w8[0] = button_get_debounced(25);
 			usbMsgPtr = uni_buffer.w8;
 			return 1;
-		case CUSTOM_RQ_READ_TMPSENS:
-			uni_buffer.w16[0] = read_temperture_sensor();
-			usbMsgPtr = uni_buffer.w8;
-			return 2;
 		}
     }
 
@@ -523,7 +505,6 @@ int main(void)
 
     DDRB &= ~_BV(BUTTON_PIN); /* make button pin input */
     PORTB |= _BV(BUTTON_PIN); /* turn on pull-up resistor */
-    init_temperature_sensor();
     counter_init();
     usbInit();
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
