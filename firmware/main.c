@@ -50,38 +50,38 @@ different port or bit, change the macros below:
 #define STATE_NEXT 3
 
 PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {
-    0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
-    0x09, 0x06,                    // USAGE (Keyboard)
-    0xa1, 0x01,                    // COLLECTION (Application)
-    0x75, 0x01,                    //   REPORT_SIZE (1)
-    0x95, 0x08,                    //   REPORT_COUNT (8)
-    0x05, 0x07,                    //   USAGE_PAGE (Keyboard)(Key Codes)
-    0x19, 0xe0,                    //   USAGE_MINIMUM (Keyboard LeftControl)(224)
-    0x29, 0xe7,                    //   USAGE_MAXIMUM (Keyboard Right GUI)(231)
-    0x15, 0x00,                    //   LOGICAL_MINIMUM (0)
-    0x25, 0x01,                    //   LOGICAL_MAXIMUM (1)
-    0x81, 0x02,                    //   INPUT (Data,Var,Abs) ; Modifier byte
-    0x95, 0x01,                    //   REPORT_COUNT (1)
-    0x75, 0x08,                    //   REPORT_SIZE (8)
-    0x81, 0x03,                    //   INPUT (Cnst,Var,Abs) ; Reserved byte
-    0x95, 0x05,                    //   REPORT_COUNT (5)
-    0x75, 0x01,                    //   REPORT_SIZE (1)
-    0x05, 0x08,                    //   USAGE_PAGE (LEDs)
-    0x19, 0x01,                    //   USAGE_MINIMUM (Num Lock)
-    0x29, 0x05,                    //   USAGE_MAXIMUM (Kana)
-    0x91, 0x02,                    //   OUTPUT (Data,Var,Abs) ; LED report
-    0x95, 0x01,                    //   REPORT_COUNT (1)
-    0x75, 0x03,                    //   REPORT_SIZE (3)
-    0x91, 0x03,                    //   OUTPUT (Cnst,Var,Abs) ; LED report padding
-    0x95, 0x06,                    //   REPORT_COUNT (6)
-    0x75, 0x08,                    //   REPORT_SIZE (8)
-    0x15, 0x00,                    //   LOGICAL_MINIMUM (0)
-    0x25, 0x65,                    //   LOGICAL_MAXIMUM (101)
-    0x05, 0x07,                    //   USAGE_PAGE (Keyboard)(Key Codes)
-    0x19, 0x00,                    //   USAGE_MINIMUM (Reserved (no event indicated))(0)
-    0x29, 0x65,                    //   USAGE_MAXIMUM (Keyboard Application)(101)
-    0x81, 0x00,                    //   INPUT (Data,Ary,Abs)
-    0xc0                           // END_COLLECTION
+    0x05, 0x01,                    /* USAGE_PAGE (Generic Desktop) */
+    0x09, 0x06,                    /* USAGE (Keyboard) */
+    0xa1, 0x01,                    /* COLLECTION (Application) */
+    0x75, 0x01,                    /*   REPORT_SIZE (1) */
+    0x95, 0x08,                    /*   REPORT_COUNT (8) */
+    0x05, 0x07,                    /*   USAGE_PAGE (Keyboard)(Key Codes) */
+    0x19, 0xe0,                    /*   USAGE_MINIMUM (Keyboard LeftControl)(224) */
+    0x29, 0xe7,                    /*   USAGE_MAXIMUM (Keyboard Right GUI)(231) */
+    0x15, 0x00,                    /*   LOGICAL_MINIMUM (0) */
+    0x25, 0x01,                    /*   LOGICAL_MAXIMUM (1) */
+    0x81, 0x02,                    /*   INPUT (Data,Var,Abs) ; Modifier byte */
+    0x95, 0x01,                    /*   REPORT_COUNT (1) */
+    0x75, 0x08,                    /*   REPORT_SIZE (8) */
+    0x81, 0x03,                    /*   INPUT (Cnst,Var,Abs) ; Reserved byte */
+    0x95, 0x05,                    /*   REPORT_COUNT (5) */
+    0x75, 0x01,                    /*   REPORT_SIZE (1) */
+    0x05, 0x08,                    /*   USAGE_PAGE (LEDs) */
+    0x19, 0x01,                    /*   USAGE_MINIMUM (Num Lock) */
+    0x29, 0x05,                    /*   USAGE_MAXIMUM (Kana) */
+    0x91, 0x02,                    /*   OUTPUT (Data,Var,Abs) ; LED report */
+    0x95, 0x01,                    /*   REPORT_COUNT (1) */
+    0x75, 0x03,                    /*   REPORT_SIZE (3) */
+    0x91, 0x03,                    /*   OUTPUT (Cnst,Var,Abs) ; LED report padding */
+    0x95, 0x06,                    /*   REPORT_COUNT (6) */
+    0x75, 0x08,                    /*   REPORT_SIZE (8) */
+    0x15, 0x00,                    /*   LOGICAL_MINIMUM (0) */
+    0x25, 0x65,                    /*   LOGICAL_MAXIMUM (101) */
+    0x05, 0x07,                    /*   USAGE_PAGE (Keyboard)(Key Codes) */
+    0x19, 0x00,                    /*   USAGE_MINIMUM (Reserved (no event indicated))(0) */
+    0x29, 0x65,                    /*   USAGE_MAXIMUM (Keyboard Application)(101) */
+    0x81, 0x00,                    /*   INPUT (Data,Ary,Abs) */
+    0xc0                           /* END_COLLECTION */
 };
 
 static uint16_t secret_length_ee EEMEM = 0;
@@ -107,7 +107,6 @@ static union __attribute__((packed)) {
 	void*    ptr[UNI_BUFFER_SIZE/sizeof(void*)];
 } uni_buffer;
 
-static uint8_t uni_buffer_fill;
 static uint8_t current_command;
 
 typedef struct {
@@ -258,22 +257,22 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 	usbRequest_t    *rq = (usbRequest_t *)data;
 	if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS) {    /* class request type */
 	    switch(rq->bRequest) {
-        case USBRQ_HID_GET_REPORT: // send "no keys pressed" if asked here
-            // wValue: ReportType (highbyte), ReportID (lowbyte)
-            usbMsgPtr = (void *)&keyboard_report; // we only have this one
+        case USBRQ_HID_GET_REPORT: /* send "no keys pressed" if asked here */
+            /* wValue: ReportType (highbyte), ReportID (lowbyte) */
+            usbMsgPtr = (void *)&keyboard_report; /* we only have this one */
             keyboard_report.modifier = 0;
             keyboard_report.keycode[0] = 0;
             return sizeof(keyboard_report);
-        case USBRQ_HID_SET_REPORT: // if wLength == 1, should be LED state
+        case USBRQ_HID_SET_REPORT: /* if wLength == 1, should be LED state */
             if (rq->wLength.word == 1) {
                 current_command = LED_WRITE;
                 return USB_NO_MSG;
             }
             return 0;
-        case USBRQ_HID_GET_IDLE: // send idle rate to PC as required by spec
+        case USBRQ_HID_GET_IDLE: /* send idle rate to PC as required by spec */
             usbMsgPtr = &idleRate;
             return 1;
-        case USBRQ_HID_SET_IDLE: // save idle rate as required by spec
+        case USBRQ_HID_SET_IDLE: /* save idle rate as required by spec */
             idleRate = rq->wValue.bytes[1];
             return 0;
         }
@@ -363,7 +362,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	case LED_WRITE:
 	    if (data[0] != LED_state)
 	        LED_state = data[0];
-	    return 1; // Data read, not expecting more
+	    return 1; /* Data read, not expecting more */
 	case CUSTOM_RQ_SET_SECRET:
         {
             if (uni_buffer.w8[0] < (secret_length_b + 7) / 8) {
@@ -400,15 +399,15 @@ int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e
     /* do a binary search: */
     do {
         OSCCAL = trialValue + step;
-        x = usbMeasureFrameLength();    // proportional to current real frequency
-        if(x < targetValue)             // frequency still too low
+        x = usbMeasureFrameLength();    /* proportional to current real frequency */
+        if(x < targetValue)             /* frequency still too low */
             trialValue += step;
         step >>= 1;
     } while(step > 0);
     /* We have a precision of +/- 1 for optimum OSCCAL here */
     /* now do a neighborhood search for optimum value */
     optimumValue = trialValue;
-    optimumDev = x; // this is certainly far away from optimum
+    optimumDev = x; /* this is certainly far away from optimum */
     for (OSCCAL = trialValue - 1; OSCCAL <= trialValue + 1; OSCCAL++){
         x = usbMeasureFrameLength() - targetValue;
         if (x < 0)
@@ -424,11 +423,9 @@ int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e
 
 void usbEventResetReady(void)
 {
-    cli();  // usbMeasureFrameLength() counts CPU cycles, so disable interrupts.
+    cli();  /* usbMeasureFrameLength() counts CPU cycles, so disable interrupts. */
     calibrateOscillator();
     sei();
-// we never read the value from eeprom so this causes only degradation of eeprom
-//    eeprom_write_byte(0, OSCCAL);   // store the calibrated value in EEPROM
 }
 
 /* ------------------------------------------------------------------------- */
@@ -476,7 +473,7 @@ int main(void)
             switch(key_state) {
             case STATE_SEND_KEY:
                 buildReport(token[idx]);
-                key_state = STATE_RELEASE_KEY; // release next
+                key_state = STATE_RELEASE_KEY; /* release next */
                 break;
             case STATE_RELEASE_KEY:
                 buildReport(0);
@@ -489,9 +486,9 @@ int main(void)
                 }
                 break;
             default:
-                key_state = STATE_WAIT; // should not happen
+                key_state = STATE_WAIT; /* should not happen */
             }
-                        // start sending
+                        /* start sending */
             usbSetInterrupt((void *)&keyboard_report, sizeof(keyboard_report));
 
         }
