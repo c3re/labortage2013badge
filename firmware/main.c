@@ -229,13 +229,6 @@ void buildReport(uchar send_key) {
     keyboard_report.modifier = 0;
 
     switch (send_key) {
-    case 'A' ... 'Z':
-        keyboard_report.modifier = MOD_SHIFT_LEFT;
-        keyboard_report.keycode[0] = KEY_A + (send_key-'A');
-        break;
-    case 'a' ... 'z':
-        keyboard_report.keycode[0] = KEY_A + (send_key-'a');
-        break;
     case '1' ... '9':
         keyboard_report.keycode[0] = KEY_1 + (send_key-'1');
         break;
