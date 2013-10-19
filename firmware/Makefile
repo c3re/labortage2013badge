@@ -11,13 +11,14 @@ DEVICE  = attiny85 #attiny45
 F_CPU   = 16500000
 FUSE_L  = 0xe1# 1110.0001
 FUSE_H  = 0x9d# 1001.1101
+FUSE_E  = 0xfe# 1111.1110
 #AVRDUDE = avrdude -c avr910 -P /dev/ttyUSB0 -p $(DEVICE) # edit this line for your programmer
 AVRDUDE_ISP = avrdude -c jtag2isp -P usb -p $(DEVICE) # edit this line for your programmer
 AVRDUDE_DW  = avrdude -c jtag2dw  -P usb -p $(DEVICE) # edit this line for your programmer
 
 CFLAGS  = -Iusbdrv -I. -DDEBUG_LEVEL=0
 OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o main.o \
-          percnt2.o sha1-asm.o hmac-sha1.o hotp.o special_functions.o
+          sha1-asm.o hmac-sha1.o hotp.o special_functions.o
 
 COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 COMPILEPP = avr-g++ -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
@@ -40,9 +41,9 @@ xprog_d: fuse flash_dw
 
 # rule for programming fuse bits:
 fuse:
-	@[ "$(FUSE_H)" != "" -a "$(FUSE_L)" != "" ] || \
+	@[ "$(FUSE_H)" != "" -a "$(FUSE_L)" != "" -a "$(FUSE_E)" != "" ] || \
 		{ echo "*** Edit Makefile and choose values for FUSE_L and FUSE_H!"; exit 1; }
-	$(AVRDUDE_ISP) -U hfuse:w:$(FUSE_H):m -U lfuse:w:$(FUSE_L):m
+	$(AVRDUDE_ISP) -U hfuse:w:$(FUSE_H):m -U lfuse:w:$(FUSE_L):m -U efuse:w:$(FUSE_E):m
 
 # rule for uploading firmware:
 flash_isp: main.hex

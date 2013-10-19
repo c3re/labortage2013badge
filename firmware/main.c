@@ -16,12 +16,9 @@ at least be connected to INT0 as well.
 We assume that an LED is connected to port B bit 0. If you connect it to a
 different port or bit, change the macros below:
 */
-#define LED_PORT_DDR        DDRB
-#define LED_PORT_OUTPUT     PORTB
-#define R_BIT            4
-#define G_BIT            3
-#define B_BIT            1
 #define BUTTON_PIN 4
+
+#define SIMPLE_COUNTER 1
 
 #include <stdint.h>
 #include <string.h>
@@ -39,11 +36,20 @@ different port or bit, change the macros below:
 #include "requests.h"       /* The custom request numbers we use */
 #include "special_functions.h"
 #include "hotp.h"
+#if !SIMPLE_COUNTER
 #include "percnt2.h"
+#endif
+#include "usb_keyboard_codes.h"
 
 /* ------------------------------------------------------------------------- */
 /* ----------------------------- USB interface ----------------------------- */
 /* ------------------------------------------------------------------------- */
+
+#define STATE_WAIT 0
+#define STATE_SEND_KEY 1
+#define STATE_RELEASE_KEY 2
+#define STATE_NEXT 3
+
 PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {
     0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
     0x09, 0x06,                    // USAGE (Keyboard)
@@ -79,85 +85,21 @@ PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
     0xc0                           // END_COLLECTION
 };
 
-uint16_t secret_length_ee EEMEM = 0;
-uint8_t  secret_ee[32] EEMEM;
-uint8_t  reset_counter_ee EEMEM = 0;
-uint8_t  digits_ee EEMEM = 8;
+static uint16_t secret_length_ee EEMEM = 0;
+static uint8_t  secret_ee[32] EEMEM;
+static uint8_t  reset_counter_ee EEMEM = 0;
+static uint8_t  digits_ee EEMEM = 8;
 
-/* Keyboard usage values, see usb.org's HID-usage-tables document, chapter
- * 10 Keyboard/Keypad Page for more codes.
- */
-#define MOD_CONTROL_LEFT    (1<<0)
-#define MOD_SHIFT_LEFT      (1<<1)
-#define MOD_ALT_LEFT        (1<<2)
-#define MOD_GUI_LEFT        (1<<3)
-#define MOD_CONTROL_RIGHT   (1<<4)
-#define MOD_SHIFT_RIGHT     (1<<5)
-#define MOD_ALT_RIGHT       (1<<6)
-#define MOD_GUI_RIGHT       (1<<7)
-
-#define KEY_A       4
-#define KEY_B       5
-#define KEY_C       6
-#define KEY_D       7
-#define KEY_E       8
-#define KEY_F       9
-#define KEY_G       10
-#define KEY_H       11
-#define KEY_I       12
-#define KEY_J       13
-#define KEY_K       14
-#define KEY_L       15
-#define KEY_M       16
-#define KEY_N       17
-#define KEY_O       18
-#define KEY_P       19
-#define KEY_Q       20
-#define KEY_R       21
-#define KEY_S       22
-#define KEY_T       23
-#define KEY_U       24
-#define KEY_V       25
-#define KEY_W       26
-#define KEY_X       27
-#define KEY_Y       28
-#define KEY_Z       29
-#define KEY_1       30
-#define KEY_2       31
-#define KEY_3       32
-#define KEY_4       33
-#define KEY_5       34
-#define KEY_6       35
-#define KEY_7       36
-#define KEY_8       37
-#define KEY_9       38
-#define KEY_0       39
-
-#define KEY_F1      58
-#define KEY_F2      59
-#define KEY_F3      60
-#define KEY_F4      61
-#define KEY_F5      62
-#define KEY_F6      63
-#define KEY_F7      64
-#define KEY_F8      65
-#define KEY_F9      66
-#define KEY_F10     67
-#define KEY_F11     68
-#define KEY_F12     69
-
-#define NUM_LOCK 1
-#define CAPS_LOCK 2
-#define SCROLL_LOCK 4
+#if SIMPLE_COUNTER
+static uint32_t counter_ee EEMEM = 0;
+#endif
 
 static uint8_t dbg_buffer[8];
-
 static uint8_t secret[32];
 static uint16_t secret_length_b;
 static char token[10];
 
-
-#define UNI_BUFFER_SIZE 36
+#define UNI_BUFFER_SIZE 16
 
 static union __attribute__((packed)) {
 	uint8_t  w8[UNI_BUFFER_SIZE];
@@ -175,16 +117,10 @@ typedef struct {
     uint8_t keycode[6];
 } keyboard_report_t;
 
-#define STATE_WAIT 0
-#define STATE_SEND_KEY 1
-#define STATE_RELEASE_KEY 2
-#define STATE_NEXT 3
-
-
-static keyboard_report_t keyboard_report; // sent to PC
-static uchar idleRate;           /* in 4 ms units */
+static keyboard_report_t keyboard_report; /* report sent to the host */
+static uchar idleRate;  /* in 4 ms units */
 static uchar key_state = STATE_WAIT;
-volatile static uchar LED_state = 0xff; // received from PC
+volatile static uchar LED_state = 0xff;
 /* ------------------------------------------------------------------------- */
 
 static
@@ -193,17 +129,22 @@ void memory_clean(void) {
     secret_length_b = 0;
 }
 
+#define NO_CHECK 1
+
 static
 uint8_t secret_set(void){
+#if !NO_CHECK
     uint8_t r;
     union {
         uint8_t w8[32];
         uint16_t w16[16];
     } read_back;
+#endif
     const uint8_t length_B = (secret_length_b + 7) / 8;
 
     eeprom_busy_wait();
     eeprom_write_block(secret, secret_ee, length_B);
+#if !NO_CHECK
     eeprom_busy_wait();
     eeprom_read_block(read_back.w8, secret_ee, length_B);
     r = memcmp(secret, read_back.w8, length_B);
@@ -212,8 +153,10 @@ uint8_t secret_set(void){
     if (r) {
         return 1;
     }
+#endif
     eeprom_busy_wait();
     eeprom_write_word(&secret_length_ee, secret_length_b);
+#if !NO_CHECK
     eeprom_busy_wait();
     r = eeprom_read_word(&secret_length_ee) == secret_length_b;
     memory_clean();
@@ -221,17 +164,24 @@ uint8_t secret_set(void){
     if (!r) {
         return 1;
     }
+#else
+    memory_clean();
+#endif
+
     return 0;
 }
 
 static
-void token_generate(void) {
+void counter_inc(void){
+#if SIMPLE_COUNTER
+    uint32_t t;
+    eeprom_busy_wait();
+    t = eeprom_read_dword(&counter_ee);
+    eeprom_busy_wait();
+    eeprom_write_dword(&counter_ee, t + 1);
+#else
     percnt_inc(0);
-    eeprom_busy_wait();
-    eeprom_read_block(secret, secret_ee, 32);
-    eeprom_busy_wait();
-    hotp(token, secret, eeprom_read_word(&secret_length_ee), percnt_get(0), eeprom_read_byte(&digits_ee));
-    memory_clean();
+#endif
 }
 
 static
@@ -239,19 +189,41 @@ void counter_reset(void) {
     uint8_t reset_counter;
     eeprom_busy_wait();
     reset_counter = eeprom_read_byte(&reset_counter_ee);
+#if SIMPLE_COUNTER
+    eeprom_busy_wait();
+    eeprom_write_dword(&counter_ee, 0);
+#else
     percnt_reset(0);
+#endif
     eeprom_busy_wait();
     eeprom_write_byte(&reset_counter_ee, reset_counter + 1);
 }
 
 static
 void counter_init(void) {
+#if !SIMPLE_COUNTER
     eeprom_busy_wait();
     if (eeprom_read_byte(&reset_counter_ee) == 0) {
         counter_reset();
     }
     percnt_init(0);
+#endif
 }
+
+static
+void token_generate(void) {
+    counter_inc();
+    eeprom_busy_wait();
+    eeprom_read_block(secret, secret_ee, 32);
+    eeprom_busy_wait();
+#if SIMPLE_COUNTER
+    hotp(token, secret, eeprom_read_word(&secret_length_ee), eeprom_read_dword(&counter_ee), eeprom_read_byte(&digits_ee));
+#else
+    hotp(token, secret, eeprom_read_word(&secret_length_ee), percnt_get(0), eeprom_read_byte(&digits_ee));
+#endif
+    memory_clean();
+}
+
 
 static
 void buildReport(uchar send_key) {
@@ -340,10 +312,15 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
     	    uni_buffer.w8[0] = 0;
     	    return USB_NO_MSG;
     	case CUSTOM_RQ_INC_COUNTER:
-    	    percnt_inc(0);
+    	    counter_inc();
     	    return 0;
     	case CUSTOM_RQ_GET_COUNTER:
+#if SIMPLE_COUNTER
+    	    eeprom_busy_wait();
+    	    uni_buffer.w32[0] = eeprom_read_dword(&counter_ee);
+#else
     	    uni_buffer.w32[0] = percnt_get(0);
+#endif
     	    usbMsgPtr = (usbMsgPtr_t)uni_buffer.w32;
     	    return 4;
     	case CUSTOM_RQ_RESET_COUNTER:
@@ -547,6 +524,7 @@ int main(void)
     DDRB &= ~_BV(BUTTON_PIN); /* make button pin input */
     PORTB |= _BV(BUTTON_PIN); /* turn on pull-up resistor */
     init_temperature_sensor();
+    counter_init();
     usbInit();
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
     while(--i){             /* fake USB disconnect for ~512 ms */
