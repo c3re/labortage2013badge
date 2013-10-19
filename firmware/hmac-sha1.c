@@ -89,10 +89,10 @@ void hmac_sha1_final(void *dest, hmac_sha1_ctx_t *s){
 #endif
 
 /*
- * keylength in bits!
+ * key length in bits!
  * message length in bits!
  */
-void hmac_sha1(void *dest, const void *key, uint16_t keylength_b, const void *msg, uint32_t msglength_b){ /* a one-shot*/
+void hmac_sha1(void *dest, const void *key, uint16_t keylength_b, const void *msg, uint32_t msglength_b){ /* a one-shot */
 	sha1_ctx_t s;
 	uint8_t i;
 	uint8_t buffer[SHA1_BLOCK_BYTES];
