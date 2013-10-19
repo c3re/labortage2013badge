@@ -20,38 +20,6 @@
 #include <avr/io.h>
 #include "usbconfig.h"
 
-.global exec_spm
-/* void exec_spm(uint16_t z, uint16_t r0r1, void* dest, void* src, uint8_t len); */
-exec_spm:
-	push r28
-	push r29
-	movw r30, r24
-	movw r0, r22
-	movw r28, r20
-	movw r26, r18
-	movw r24, r16
-	in r23, _SFR_IO_ADDR(SREG)
-	cli
-	tst r24
-	breq spm_cmd
-	dec r24
-	breq last_store
-copy_loop:
-	ld r22, X+
-	st Y+, r22
-	dec r24
-	brne copy_loop
-last_store:
-	ld r22, X+
-	st Y+, r22
-spm_cmd:
-	spm
-	out _SFR_IO_ADDR(SREG), r23
-	clr r1
-	pop r29
-	pop r28
-	ret
-
 .global soft_reset
 soft_reset:
 	cli

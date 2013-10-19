@@ -34,7 +34,6 @@ different port or bit, change the macros below:
 #include "usbdrv.h"
 #include "oddebug.h"        /* This is also an example for using debug macros */
 #include "requests.h"       /* The custom request numbers we use */
-#include "special_functions.h"
 #include "hotp.h"
 #if !SIMPLE_COUNTER
 #include "percnt2.h"
@@ -350,20 +349,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			usbMsgPtr = dbg_buffer;
 			return len;
 		}
-		case CUSTOM_RQ_READ_MEM:
-			usbMsgPtr = (uchar*)rq->wValue.word;
-			return rq->wLength.word;
-		case CUSTOM_RQ_WRITE_MEM:
-		case CUSTOM_RQ_EXEC_SPM:
-/*			uni_buffer_fill = 4;
-			uni_buffer.w16[0] = rq->wValue.word;
-			uni_buffer.w16[1] = rq->wLength.word;
-			return USB_NO_MSG;
-*/		case CUSTOM_RQ_READ_FLASH:
-			uni_buffer.w16[0] = rq->wValue.word;
-			uni_buffer.w16[1] = rq->wLength.word;
-            uni_buffer_fill = 4;
-			return USB_NO_MSG;
 		case CUSTOM_RQ_RESET:
 			soft_reset((uint8_t)(rq->wValue.word));
 			break;
@@ -404,46 +389,12 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 		}
 		memcpy(dbg_buffer, data, len);
 		return 1;
-	case CUSTOM_RQ_WRITE_MEM:
-		memcpy(uni_buffer.ptr[0], data, len);
-		uni_buffer.w16[0] += len;
-		return !(uni_buffer.w16[1] -= len);
-	case CUSTOM_RQ_EXEC_SPM:
-		if(uni_buffer_fill < 8){
-			uint8_t l = 8 - uni_buffer_fill;
-			if(len<l){
-				len = l;
-			}
-			memcpy(&(uni_buffer.w8[uni_buffer_fill]), data, len);
-			uni_buffer_fill += len;
-			return 0;
-		}
-		uni_buffer.w16[1] -= len;
-		if (uni_buffer.w16[1] > 8) {
-			memcpy(uni_buffer.ptr[0], data, len);
-			uni_buffer.w16[0] += len;
-			return 0;
-		} else {
-			memcpy(&(uni_buffer.w8[uni_buffer_fill]), data, len);
-			exec_spm(uni_buffer.w16[2], uni_buffer.w16[3], uni_buffer.ptr[0], data, len);
-			return 1;
-		}
 	default:
 		return 1;
 	}
 	return 0;
 }
 uchar usbFunctionRead(uchar *data, uchar len){
-	uchar ret = len;
-	switch(current_command){
-	case CUSTOM_RQ_READ_FLASH:
-		while(len--){
-			*data++ = pgm_read_byte((uni_buffer.w16[0])++);
-		}
-		return ret;
-	default:
-		break;
-	}
 	return 0;
 }
 
