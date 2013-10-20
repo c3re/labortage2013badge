@@ -50,6 +50,8 @@ at least be connected to INT0 as well.
 #define STATE_RELEASE_KEY 2
 #define STATE_NEXT 3
 
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
 PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {
     0x05, 0x01,                    /* USAGE_PAGE (Generic Desktop) */
     0x09, 0x06,                    /* USAGE (Keyboard) */
@@ -340,23 +342,23 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
             return 0;
 		case CUSTOM_RQ_SET_DBG:
 			return USB_NO_MSG;
-		case CUSTOM_RQ_GET_DBG:{
-			usbMsgLen_t len = 8;
-			if(len > rq->wLength.word){
-				len = rq->wLength.word;
-			}
+		case CUSTOM_RQ_GET_DBG:
 			usbMsgPtr = dbg_buffer;
-			return len;
-		}
+			return MIN(8, rq->wLength.word);
 		case CUSTOM_RQ_RESET:
 			soft_reset((uint8_t)(rq->wValue.word));
 			break;
 		case CUSTOM_RQ_READ_BUTTON:
 			uni_buffer.w8[0] = button_get_debounced(DEBOUNCE_DELAY);
 			return 1;
+#if ALLOW_SECRET_READ
 		case CUSTOM_RQ_GET_SECRET:
-		    uni_buffer.w8[0] = 0;
+            uni_buffer.w8[0] = 0;
 		    return USB_NO_MSG;
+#else
+#endif
+        default:
+            return 0;
 		}
     }
 
@@ -389,17 +391,12 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 			len = sizeof(dbg_buffer);
 		}
 		memcpy(dbg_buffer, data, len);
-		return 1;
-	default:
-		return 1;
 	}
-	return 0;
+	return 1;
 }
 
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
-
 uchar usbFunctionRead(uchar *data, uchar len){
-#if ALLOW_SECRET_READ
+#if ALLOW_SECRET_READ || 1
     uchar r;
     uint8_t s_length_B;
     switch(current_command){

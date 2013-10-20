@@ -78,7 +78,7 @@ void set_dbg(char *hex_string){
 }
 
 void get_dbg(char *param){
-	uint16_t buffer[256];
+	uint8_t buffer[256];
 	int cnt;
 	cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_DBG, 0, 0, (char*)buffer, 256, 5000);
 	printf("DBG-Buffer:\n");
@@ -191,11 +191,15 @@ void read_button(char* param){
 }
 
 void get_secret(char *param){
-    uint16_t buffer[256];
+    uint8_t buffer[64];
     int cnt;
-    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_SECRET, 0, 0, (char*)buffer, 256, 5000);
-    printf("Secret:\n");
-    hexdump_block(stdout, buffer, 0, cnt, 16);
+    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_SECRET, 0, 0, (char*)buffer, 32, 5000);
+    if (cnt > 0) {
+    printf("Secret (%d):\n", cnt);
+    hexdump_block(stdout, buffer, NULL, cnt, 16);
+    } else {
+        fprintf(stderr, "Error: usb_control_msg(...) returned %d\n", cnt);
+    }
 }
 
 
