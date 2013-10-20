@@ -167,7 +167,7 @@ void get_token(char *param){
     char token[10];
     int cnt;
     cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_TOKEN, 0, 0, token, 9, 5000);
-    if (cnt < 9 ) {
+    if (cnt <= 9 ) {
         token[cnt] = '\0';
         printf("token = %s\n", token);
     } else {
