@@ -15,10 +15,11 @@ different I/O pins for USB. Please note that USB D+ must be the INT0 pin, or
 at least be connected to INT0 as well.
 */
 
-#define BUTTON_PIN 4
-
+#define BUTTON_PIN 5
+#define DEBOUNCE_DELAY 50
 #define SIMPLE_COUNTER 1
 #define NO_CHECK 1
+#define ALLOW_SECRET_READ 0
 
 #include <stdint.h>
 #include <string.h>
@@ -34,6 +35,7 @@ at least be connected to INT0 as well.
 #include "usbdrv.h"
 #include "requests.h"       /* The custom request numbers we use */
 #include "hotp.h"
+#include "special_functions.h"
 #if !SIMPLE_COUNTER
 #include "percnt2.h"
 #endif
@@ -207,14 +209,23 @@ void counter_init(void) {
 
 static
 void token_generate(void) {
+    uint16_t s_length_b;
+    uint8_t digits;
     counter_inc();
     eeprom_busy_wait();
     eeprom_read_block(secret, secret_ee, 32);
     eeprom_busy_wait();
+    s_length_b = eeprom_read_word(&secret_length_ee);
+    if (s_length_b > 256) {
+        s_length_b = 256;
+    }
+    eeprom_busy_wait();
+    digits = eeprom_read_byte(&digits_ee);
 #if SIMPLE_COUNTER
-    hotp(token, secret, eeprom_read_word(&secret_length_ee), eeprom_read_dword(&counter_ee), eeprom_read_byte(&digits_ee));
+    eeprom_busy_wait();
+    hotp(token, secret, s_length_b, eeprom_read_dword(&counter_ee) - 1, digits);
 #else
-    hotp(token, secret, eeprom_read_word(&secret_length_ee), percnt_get(0), eeprom_read_byte(&digits_ee));
+    hotp(token, secret, s_length_b, percnt_get(0) - 1, digits);
 #endif
     memory_clean();
 }
@@ -223,7 +234,6 @@ void token_generate(void) {
 static
 void buildReport(uchar send_key) {
     keyboard_report.modifier = 0;
-
     switch (send_key) {
     case '1' ... '9':
         keyboard_report.keycode[0] = KEY_1 + (send_key-'1');
@@ -237,13 +247,13 @@ void buildReport(uchar send_key) {
 }
 
 static
-int8_t button_get_debounced(volatile uint8_t debounce_count) {
+int8_t button_get_debounced(volatile int8_t debounce_count) {
     uint8_t v;
     v = PINB & _BV(BUTTON_PIN);
-    while (debounce_count-- && v == (PINB & _BV(BUTTON_PIN))) {
+    while (debounce_count-- && (v == (PINB & _BV(BUTTON_PIN)))) {
         ;
     }
-    if (debounce_count) {
+    if (debounce_count != -1) {
         return -1;
     }
     return v ? 0 : 1;
@@ -342,8 +352,11 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 			soft_reset((uint8_t)(rq->wValue.word));
 			break;
 		case CUSTOM_RQ_READ_BUTTON:
-			uni_buffer.w8[0] = button_get_debounced(25);
+			uni_buffer.w8[0] = button_get_debounced(DEBOUNCE_DELAY);
 			return 1;
+		case CUSTOM_RQ_GET_SECRET:
+		    uni_buffer.w8[0] = 0;
+		    return USB_NO_MSG;
 		}
     }
 
@@ -382,8 +395,25 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	}
 	return 0;
 }
+
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
 uchar usbFunctionRead(uchar *data, uchar len){
-	return 0;
+#if ALLOW_SECRET_READ
+    uchar r;
+    uint8_t s_length_B;
+    switch(current_command){
+    case CUSTOM_RQ_GET_SECRET:
+        eeprom_busy_wait();
+        s_length_B = (eeprom_read_word(&secret_length_ee) + 7) / 8;
+        r = MIN(len, s_length_B - uni_buffer.w8[0]);
+        eeprom_busy_wait();
+        eeprom_read_block(data, secret_ee + uni_buffer.w8[0], r);
+        uni_buffer.w8[0] += r;
+        return r;
+    }
+#endif
+    return 0;
 }
 
 static void calibrateOscillator(void)
@@ -440,8 +470,6 @@ int main(void)
      * additional hardware initialization.
      */
 
-    DDRB &= ~_BV(BUTTON_PIN); /* make button pin input */
-    PORTB |= _BV(BUTTON_PIN); /* turn on pull-up resistor */
     counter_init();
     usbInit();
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
@@ -452,14 +480,17 @@ int main(void)
     usbDeviceConnect();
 	
     sei();
+    DDRB &= ~_BV(BUTTON_PIN); /* make button pin input */
+    PORTB |= _BV(BUTTON_PIN); /* turn on pull-up resistor */
 
     for(;;){                /* main event loop */
         wdt_reset();
         usbPoll();
 
-        i = button_get_debounced(25);
+        i = button_get_debounced(DEBOUNCE_DELAY);
         if (i != -1) {
             if (last_stable_button_state == 0 && i == 1) {
+                token_generate();
                 key_state = STATE_SEND_KEY;
             }
             last_stable_button_state = i;

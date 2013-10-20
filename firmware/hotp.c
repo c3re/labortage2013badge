@@ -19,6 +19,7 @@
 
 
 #include <stdlib.h>
+#include <string.h>
 #include <inttypes.h>
 #include <hmac-sha1.h>
 
@@ -39,6 +40,19 @@ uint32_t dtrunc(uint8_t* buffer) {
 }
 
 static
+void reverse_string(char *str) {
+    char *end;
+    end = str + strlen(str) - 1;
+    while (end > str) {
+        *str ^= *end;
+        *end ^= *str;
+        *str ^= *end;
+        ++str;
+        --end;
+    }
+}
+
+static
 void to_digits(char *buffer, uint32_t value, uint8_t digits) {
     ldiv_t t;
     if (value == 0) {
@@ -52,24 +66,28 @@ void to_digits(char *buffer, uint32_t value, uint8_t digits) {
     *buffer = '\0';
 }
 
-void hotp(char *buffer, void* secret, uint16_t secret_length_b, uint32_t counter, uint8_t digits) {
+void hotp(char *buffer, const void* secret, uint16_t secret_length_b, uint32_t counter, uint8_t digits) {
     union {
         uint8_t mac[20];
         uint8_t ctr_buffer[8];
     } d;
     uint32_t s;
-    d.ctr_buffer[7] = 0;
-    d.ctr_buffer[6] = 0;
-    d.ctr_buffer[5] = 0;
-    d.ctr_buffer[4] = 0;
-    d.ctr_buffer[3] = counter & 0xff;
+    d.ctr_buffer[7] = counter & 0xff;
     counter >>= 8;
-    d.ctr_buffer[2] = counter & 0xff;
+    d.ctr_buffer[6] = counter & 0xff;
     counter >>= 8;
-    d.ctr_buffer[1] = counter & 0xff;
+    d.ctr_buffer[5] = counter & 0xff;
     counter >>= 8;
-    d.ctr_buffer[0] = counter & 0xff;
+    d.ctr_buffer[4] = counter & 0xff;
+    d.ctr_buffer[3] = 0;
+    d.ctr_buffer[2] = 0;
+    d.ctr_buffer[1] = 0;
+    d.ctr_buffer[0] = 0;
+    if (digits > 9) {
+        digits = 9;
+    }
     hmac_sha1(d.mac, secret, secret_length_b, d.ctr_buffer, 64);
     s = dtrunc(d.mac);
     to_digits(buffer, s, digits);
+    reverse_string(buffer);
 }

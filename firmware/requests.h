@@ -42,6 +42,7 @@
 
 #define CUSTOM_RQ_GET_TOKEN         0x69
 
+#define CUSTOM_RQ_GET_SECRET        0x61
 
 
 

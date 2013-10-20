@@ -22,6 +22,6 @@
 
 #include <stdint.h>
 
-void hotp(char *buffer, void* secret, uint16_t secret_length_b, uint32_t counter, uint8_t digits);
+void hotp(char *buffer, const void* secret, uint16_t secret_length_b, uint32_t counter, uint8_t digits);
 
 #endif /* HOTP_H_ */
