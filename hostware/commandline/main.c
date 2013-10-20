@@ -106,6 +106,7 @@ void set_secret(char *hex_string){
         } else {
             buffer[length] |= t << 4;
         }
+        ++i;
     }
 
     usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, CUSTOM_RQ_SET_SECRET, length * 8, 0, (char*)buffer, length, 5000);
@@ -184,10 +185,19 @@ void soft_reset(char* param){
 }
 
 void read_button(char* param){
-	uint8_t v;
+	int8_t v;
 	usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_READ_BUTTON, 0, 0, (char*)&v, 1, 5000);
-	printf("button is %s\n",v?"on":"off");
+	printf("button is %s (%"PRId8")\n", v ? "on" : "off", v);
 }
+
+void get_secret(char *param){
+    uint16_t buffer[256];
+    int cnt;
+    cnt = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN, CUSTOM_RQ_GET_SECRET, 0, 0, (char*)buffer, 256, 5000);
+    printf("Secret:\n");
+    hexdump_block(stdout, buffer, 0, cnt, 16);
+}
+
 
 static struct option long_options[] =
              {
@@ -207,6 +217,7 @@ static struct option long_options[] =
                {"get-dbg",           no_argument,       NULL, 'x'},
                {"set-dbg",           required_argument, NULL, 'y'},
                {"clr-dbg",           no_argument,       NULL, 'z'},
+               {"get-secret",        no_argument,       NULL, 'S'},
                {0, 0, 0, 0}
              };
 
@@ -230,7 +241,7 @@ static void usage(char *name)
 	"    -x --get-dbg ................ get content of the debug register\n"
     "    -y --set-dbg <data>.......... set content of the debug register (<data> is a byte squence in hex of max. 8 bytes)\n"
     "    -z --clr-dbg ................ clear the content of the debug register\n"
-
+    "    -S --get-secret ............. get secret (deactivated for productive devices)\n\n"
 	" Please note:\n"
 	"   If you use optional parameters you have to use two different way to specify the parameter,\n"
 	"   depending on if you use short or long options.\n"
@@ -266,12 +277,12 @@ int main(int argc, char **argv)
     }
 
     for (;;) {
-    	c = getopt_long(argc, argv, "s:icrqDd:R::tbBxy:z", long_options, &option_index);
+    	c = getopt_long(argc, argv, "s:icrqDd:R::tbBxy:zS", long_options, &option_index);
     	if (c == -1) {
     		break;
     	}
 
-    	if (action_fn && strchr("sicrqDdRtbBxyz", c)) {
+    	if (action_fn && strchr("sicrqDdRtbBxyzS", c)) {
     		/* action given while already having an action */
     		usage(argv[0]);
     		exit(1);
@@ -311,6 +322,7 @@ int main(int argc, char **argv)
     	case 'y': action_fn = set_dbg; break;
     	case 'x': action_fn = get_dbg; break;
     	case 'z': action_fn = clr_dbg; break;
+        case 'S': action_fn = get_secret; break;
         default:
     		break;
     	}
