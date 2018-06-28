@@ -24,6 +24,7 @@ COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 COMPILEPP = avr-g++ -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 
 # symbolic targets:
+program: clean hex flash
 help:
 	@echo "This Makefile has no default rule. Use one of the following:"
 	@echo "make hex ....... to build main.hex"
@@ -34,7 +35,8 @@ help:
 
 hex: main.hex
 
-program: flash
+flash: 
+	micronucleus --run main.hex
 
 xprog_i: flash_isp fuse
 xprog_d: fuse flash_dw

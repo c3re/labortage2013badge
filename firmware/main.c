@@ -15,11 +15,13 @@ different I/O pins for USB. Please note that USB D+ must be the INT0 pin, or
 at least be connected to INT0 as well.
 */
 
-#define BUTTON_PIN 5
+#define BUTTON_PIN 0
 #define DEBOUNCE_DELAY 50
 #define SIMPLE_COUNTER 1
 #define NO_CHECK 1
 #define ALLOW_SECRET_READ 0
+#define SEND_NUM_TOKENS 3   /* how many tokens to send on startup */
+#define STARTUP_DELAY 170000 /* in main-loop iterations */
 
 #include <stdint.h>
 #include <string.h>
@@ -456,7 +458,7 @@ void usbEventResetReady(void)
 int main(void)
 {
 	size_t idx = 0;
-	int8_t i = 0, last_stable_button_state = 0;
+	int8_t i = 0;
 
     wdt_enable(WDTO_1S);
     /* Even if you don't use the watchdog, turn it off here. On newer devices,
@@ -480,20 +482,17 @@ int main(void)
     DDRB &= ~_BV(BUTTON_PIN); /* make button pin input */
     PORTB |= _BV(BUTTON_PIN); /* turn on pull-up resistor */
 
-    for(;;){                /* main event loop */
+    int t = 0;
+    uint32_t w = 0;            /* start delay */
+    for(;;w++){                /* main event loop */
         wdt_reset();
         usbPoll();
-
-        i = button_get_debounced(DEBOUNCE_DELAY);
-        if (i != -1) {
-            if (last_stable_button_state == 0 && i == 1) {
-                token_generate();
-                key_state = STATE_SEND_KEY;
+        if(usbInterruptIsReady() && w > STARTUP_DELAY){
+            if(key_state == STATE_WAIT && t < SEND_NUM_TOKENS) {
+              token_generate();
+              key_state = STATE_SEND_KEY;
+              t++;
             }
-            last_stable_button_state = i;
-        }
-
-        if(usbInterruptIsReady() && key_state != STATE_WAIT){
             switch(key_state) {
             case STATE_SEND_KEY:
                 buildReport(token[idx]);
